@@ -108,6 +108,7 @@
   let etiquetaLote = '';
   let capturados = cargarCapturados();
   let scannerStream = null;
+  let pantallaEscaneoActiva = false;
   let scannerLoopId = null;
   let scannerDetector = null;
   let disparadorActivo = false;
@@ -221,6 +222,11 @@
       return;
     }
 
+    pantallaEscaneoActiva = true;
+    abrirCamara();
+  }
+
+  function abrirCamara(){
     navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } })
       .then(stream=>{
         scannerStream = stream;
@@ -240,6 +246,16 @@
         document.getElementById('volverBtnCam').addEventListener('click', renderInicio);
       });
   }
+
+  document.addEventListener('visibilitychange', ()=>{
+    if(!pantallaEscaneoActiva) return;
+    if(document.visibilityState === 'hidden'){
+      if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
+      scannerDetector = null;
+    }else if(document.visibilityState === 'visible'){
+      if(!scannerStream && document.getElementById('scanVideo')){ abrirCamara(); }
+    }
+  });
 
   async function scannerLoop(){
     if(!disparadorActivo) return;
@@ -282,6 +298,7 @@
   }
 
   function detenerCamara(){
+    pantallaEscaneoActiva = false;
     if(scannerLoopId){ cancelAnimationFrame(scannerLoopId); scannerLoopId = null; }
     if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
     scannerDetector = null;
