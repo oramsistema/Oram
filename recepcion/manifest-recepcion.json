@@ -4,7 +4,7 @@
   "description": "Recepción rápida de mercancía nueva por código de barras.",
   "start_url": "./",
   "scope": "./",
-  "id": "./",
+  "id": "oram-recepcion-app-unica-003",
   "display": "standalone",
   "background_color": "#F3FBF6",
   "theme_color": "#16A34A",
