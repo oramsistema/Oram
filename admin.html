@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Panel de Clientes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#F3FBF6; --surface:#FFFFFF; --surface-alt:#EAFBF1;
+    --ink:#152A1E; --ink-soft:#5D7368;
+    --green-500:#22C55E; --green-600:#16A34A; --green-700:#127A3A; --green-100:#D8F7E4;
+    --line:#DFEFE5; --red:#DC2626; --red-bg:#FDECEC; --amber:#B45309; --amber-bg:#FEF3C7;
+    --radius-sm:8px; --radius-md:14px; --radius-lg:20px;
+    --shadow:0 1px 2px rgba(21,42,30,.06), 0 12px 28px -16px rgba(21,42,30,.22);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0E1712; --surface:#142019; --surface-alt:#16281F; --ink:#EAF3EC; --ink-soft:#9FB6A8;
+      --green-500:#34D399; --green-600:#22C55E; --green-700:#3ADB86; --green-100:#1C3A2A;
+      --line:#223226; --red:#F87171; --red-bg:#3B1616; --amber:#FBBF24; --amber-bg:#3A2A0E;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0E1712; --surface:#142019; --surface-alt:#16281F; --ink:#EAF3EC; --ink-soft:#9FB6A8;
+    --green-500:#34D399; --green-600:#22C55E; --green-700:#3ADB86; --green-100:#1C3A2A;
+    --line:#223226; --red:#F87171; --red-bg:#3B1616; --amber:#FBBF24; --amber-bg:#3A2A0E;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{ background:var(--bg); color:var(--ink); font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh; }
+  h1,h2,h3{ font-family:'Space Grotesk',sans-serif; margin:0; }
+  button,input,select{ font-family:inherit; }
+  :focus-visible{ outline:2px solid var(--green-600); outline-offset:2px; }
+  @media (prefers-reduced-motion: reduce){ *{ transition:none !important; animation:none !important; } }
+
+  .topbar{ position:sticky; top:0; z-index:10; background:var(--surface); border-bottom:1px solid var(--line); padding:14px 28px; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+  .brand{ display:flex; align-items:center; gap:10px; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:1.1rem; }
+  .brand svg{ color:var(--green-600); }
+  .content{ max-width:1100px; margin:0 auto; padding:28px; }
+
+  .btn-primary{ background:var(--green-600); color:#fff; border:none; padding:11px 20px; border-radius:var(--radius-sm); font-weight:600; cursor:pointer; font-size:.95rem; }
+  .btn-primary:hover{ background:var(--green-700); }
+  .btn-primary:disabled{ background:var(--line); color:var(--ink-soft); cursor:not-allowed; }
+  .btn-secondary{ background:var(--surface-alt); color:var(--green-700); border:1px solid var(--green-100); padding:10px 18px; border-radius:var(--radius-sm); font-weight:600; cursor:pointer; }
+  .btn-ghost{ background:transparent; border:1px solid var(--line); color:var(--ink); padding:10px 18px; border-radius:var(--radius-sm); cursor:pointer; font-weight:600; }
+  .btn-danger{ background:var(--red); color:#fff; border:none; padding:10px 18px; border-radius:var(--radius-sm); font-weight:600; cursor:pointer; }
+  .btn-sm{ padding:6px 12px; font-size:.82rem; }
+  .link-btn{ background:none; border:none; color:var(--green-700); font-weight:600; cursor:pointer; padding:4px 6px; font-size:.85rem; }
+
+  .login-wrap{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .login-card{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); box-shadow:var(--shadow); padding:32px; width:100%; max-width:360px; }
+  .login-card h1{ font-size:1.3rem; margin-bottom:6px; text-align:center; }
+  .login-card p{ color:var(--ink-soft); font-size:.88rem; text-align:center; margin-bottom:20px; }
+  .form-grid{ display:flex; flex-direction:column; gap:14px; }
+  .form-grid label{ display:flex; flex-direction:column; gap:6px; font-size:.85rem; font-weight:600; color:var(--ink-soft); }
+  .form-grid input, .form-grid select{ padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:.95rem; color:var(--ink); background:var(--surface); }
+  .error-text{ color:var(--red); font-size:.82rem; margin-top:10px; }
+
+  .summary-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:24px; }
+  @media (max-width:700px){ .summary-row{ grid-template-columns:1fr; } }
+  .summary-card{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-md); padding:16px 18px; }
+  .summary-card.warn{ border-color:var(--amber); background:var(--amber-bg); }
+  .summary-card.danger{ border-color:var(--red); background:var(--red-bg); }
+  .summary-clickable{ cursor:pointer; text-align:left; font-family:inherit; width:100%; display:flex; flex-direction:column; gap:2px; transition:box-shadow .12s, transform .08s; }
+  .summary-clickable:hover{ box-shadow:0 4px 14px -6px rgba(21,42,30,.25); }
+  .summary-clickable:active{ transform:scale(.99); }
+  .summary-clickable.active-filter{ outline:2px solid var(--green-600); outline-offset:2px; }
+  .filtro-activo-aviso{ font-size:.85rem; color:var(--ink-soft); margin:0 0 12px; }
+  .summary-label{ font-size:.78rem; color:var(--ink-soft); font-weight:600; }
+  .summary-value{ font-family:'Space Grotesk',sans-serif; font-size:1.6rem; font-weight:700; }
+
+  .panel-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:12px; }
+  .table-scroll{ overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface); }
+  .data-table{ width:100%; border-collapse:collapse; min-width:680px; }
+  .data-table th{ text-align:left; font-size:.74rem; color:var(--ink-soft); font-weight:600; padding:12px 16px; border-bottom:1px solid var(--line); background:var(--surface-alt); }
+  .data-table td{ padding:12px 16px; border-bottom:1px solid var(--line); font-size:.89rem; }
+  .data-table tr:last-child td{ border-bottom:none; }
+  .data-table td.num{ text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
+  .row-actions{ display:flex; gap:12px; }
+
+  .status-pill{ display:inline-flex; padding:3px 10px; border-radius:999px; font-size:.76rem; font-weight:600; }
+  .status-activo{ background:var(--green-100); color:var(--green-700); }
+  .status-prueba{ background:var(--amber-bg); color:var(--amber); }
+  .status-suspendido{ background:var(--red-bg); color:var(--red); }
+  .due-soon{ color:var(--amber); font-weight:600; }
+  .due-over{ color:var(--red); font-weight:600; }
+
+  .modal-overlay{ position:fixed; inset:0; background:rgba(10,20,14,.45); display:flex; align-items:center; justify-content:center; padding:20px; z-index:100; overflow-y:auto; }
+  .modal{ background:var(--surface); border-radius:var(--radius-lg); width:100%; max-width:520px; max-height:90vh; overflow-y:auto; box-shadow:0 24px 60px -20px rgba(0,0,0,.4); margin:auto; }
+  .modal-header{ display:flex; justify-content:space-between; align-items:center; padding:18px 22px; border-bottom:1px solid var(--line); }
+  .modal-header h3{ font-size:1.1rem; }
+  .modal-close{ background:none; border:none; font-size:1.3rem; cursor:pointer; color:var(--ink-soft); }
+  .modal-body{ padding:20px 22px; }
+  .modal-footer{ display:flex; justify-content:flex-end; gap:10px; padding:16px 22px; border-top:1px solid var(--line); }
+
+  .detail-section{ margin-bottom:22px; }
+  .detail-section h4{ font-family:'Space Grotesk',sans-serif; font-size:.95rem; margin-bottom:10px; }
+  .detail-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:.88rem; }
+  .detail-grid div span{ display:block; color:var(--ink-soft); font-size:.76rem; }
+  .admin-subnav{ display:flex; gap:6px; margin:14px 0 4px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  .sub-tab-btn{ padding:9px 14px; border:none; background:transparent; color:var(--ink-soft); font-weight:600; font-size:.86rem; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px; white-space:nowrap; }
+  .sub-tab-btn.active{ color:var(--green-700); border-bottom-color:var(--green-600); }
+  .sub-tab-btn:hover:not(.active){ color:var(--ink); }
+  .marca-row{ display:flex; flex-direction:column; gap:16px; }
+  .marca-field{ display:flex; flex-direction:column; gap:6px; }
+  .marca-field label{ font-size:.8rem; font-weight:600; color:var(--ink-soft); }
+  .marca-field input[type="text"]{ padding:10px 12px; border:1px solid var(--line); border-radius:8px; font-size:.92rem; color:var(--ink); background:var(--surface); }
+  .logo-uploader{ display:flex; align-items:center; gap:14px; }
+  .logo-preview{ width:56px; height:56px; border-radius:10px; object-fit:contain; border:1px solid var(--line); background:var(--surface-alt); padding:6px; }
+  .logo-preview-empty{ display:flex; align-items:center; justify-content:center; font-size:.68rem; color:var(--ink-soft); text-align:center; line-height:1.2; }
+  .color-row{ display:flex; align-items:center; gap:10px; }
+  .color-row input[type="color"]{ width:44px; height:44px; border:1px solid var(--line); border-radius:10px; padding:2px; cursor:pointer; background:var(--surface); }
+  .report-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:14px; }
+  .report-card{ background:var(--surface-alt); border-radius:var(--radius-sm); padding:12px 14px; }
+  .report-card .v{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:1.1rem; }
+  .empty-state{ padding:30px; text-align:center; color:var(--ink-soft); }
+  .mono{ font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+  .pin-reveal-row{ display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--surface-alt); border-radius:var(--radius-sm); }
+  #toastRoot{ position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:200; }
+  .toast{ background:var(--ink); color:var(--bg); padding:12px 20px; border-radius:999px; font-size:.9rem; font-weight:600; box-shadow:0 10px 30px -10px rgba(0,0,0,.4); }
+  .toast-success{ background:var(--green-700); color:#fff; }
+  .toast-warn{ background:var(--amber); color:#fff; }
+  .toast-error{ background:var(--red); color:#fff; }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="modalRoot"></div>
+  <div id="toastRoot" aria-live="polite"></div>
+
+<script>
+  // ======================================================================
+  // CONFIGURACIÓN — los mismos valores que en el punto de venta.
+  // ======================================================================
+  const SUPABASE_URL = 'https://waahxnhexfvpaypwsvqg.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_c9LODHYI87bNwTi2XaYKDw_dzvIKV2o';
+  const cloudEnabled = SUPABASE_URL.indexOf('http') === 0 && SUPABASE_ANON_KEY.length > 10;
+  let supabaseClient = null;
+  if(cloudEnabled){
+    try{ supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); }
+    catch(e){ console.error('Supabase no se pudo inicializar:', e); }
+  }
+
+  function renderNotConfigured(){
+    document.getElementById('app').innerHTML = `
+      <div class="login-wrap">
+        <div class="login-card">
+          <h1>Falta configurar este panel</h1>
+          <p>Edita las líneas <code>SUPABASE_URL</code> y <code>SUPABASE_ANON_KEY</code> al inicio del archivo con los datos de tu proyecto de Supabase, guarda el archivo y vuelve a abrirlo.</p>
+        </div>
+      </div>`;
+  }
+
+  let session = null;
+  let negocios = [];
+  let activeNegocioId = null;
+  let filtroClientes = 'todos';
+
+  function escapeHTML(str){
+    return String(str).replace(/[&<>"']/g, s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+  }
+  function formatMoney(n){
+    return '$' + (Number(n)||0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+  // Evita que un formulario recargue la página al presionar Enter; en vez de
+  // eso, dispara el mismo botón que ya hace el guardado.
+  function evitarSubmitNativo(form, buttonId){
+    if(!form) return;
+    form.addEventListener('submit', (e)=>{
+      e.preventDefault();
+      const btn = document.getElementById(buttonId);
+      if(btn && !btn.disabled) btn.click();
+    });
+  }
+  function todayStr(){
+    const d = new Date();
+    const y=d.getFullYear(), mo=String(d.getMonth()+1).padStart(2,'0'), da=String(d.getDate()).padStart(2,'0');
+    return `${y}-${mo}-${da}`;
+  }
+  function addMonths(dateStr, n){
+    const d = new Date(dateStr + 'T00:00:00');
+    d.setMonth(d.getMonth()+n);
+    return d.toISOString().slice(0,10);
+  }
+  function addDays(dateStr, n){
+    const d = new Date(dateStr + 'T00:00:00');
+    d.setDate(d.getDate()+n);
+    return d.toISOString().slice(0,10);
+  }
+  function finDePrueba(fechaAlta){
+    return addDays(fechaAlta, 15);
+  }
+  function diasRestantes(fecha){
+    if(!fecha) return null;
+    const hoy = new Date(todayStr()+'T00:00:00');
+    const venc = new Date(fecha+'T00:00:00');
+    return Math.round((venc-hoy)/86400000);
+  }
+  let toastTimer=null;
+  function showToast(msg, type){
+    const root = document.getElementById('toastRoot');
+    root.innerHTML = `<div class="toast toast-${type||'info'}">${escapeHTML(msg)}</div>`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(()=>{ root.innerHTML=''; }, 3200);
+  }
+
+  // ---------------------------------------------------------------- Login
+  function renderLogin(errorMsg){
+    document.getElementById('app').innerHTML = `
+      <div class="login-wrap">
+        <div class="login-card">
+          <h1>Panel de Clientes</h1>
+          <p>Inicia sesión con tu cuenta de administrador.</p>
+          <form id="loginForm" class="form-grid">
+            <label>Correo<input required type="email" name="email" /></label>
+            <label>Contraseña<input required type="password" name="password" /></label>
+            <button type="submit" class="btn-primary" style="width:100%;">Entrar</button>
+          </form>
+          ${errorMsg ? `<p class="error-text">${escapeHTML(errorMsg)}</p>` : ''}
+        </div>
+      </div>`;
+    document.getElementById('loginForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const email = e.target.email.value.trim();
+      const password = e.target.password.value;
+      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if(error){ renderLogin('Correo o contraseña incorrectos.'); return; }
+      session = data.session;
+      loadDashboard();
+    });
+  }
+
+  // ------------------------------------------------------------ Dashboard
+  async function loadDashboard(){
+    document.getElementById('app').innerHTML = `<div class="content"><p>Cargando…</p></div>`;
+    const { data, error } = await supabaseClient.from('negocios').select('*').order('nombre_negocio');
+    if(error){ showToast('No se pudieron cargar los negocios.', 'error'); negocios = []; }
+    else{ negocios = data || []; }
+    renderApp();
+  }
+
+  function renderApp(){
+    const porVencer = negocios.filter(n=> n.estatus==='activo' && !n.es_prueba && diasRestantes(n.fecha_proximo_pago)!==null && diasRestantes(n.fecha_proximo_pago)<=3 && diasRestantes(n.fecha_proximo_pago)>=0);
+    const vencidos = negocios.filter(n=> n.estatus==='activo' && !n.es_prueba && diasRestantes(n.fecha_proximo_pago)!==null && diasRestantes(n.fecha_proximo_pago)<0);
+    const enPrueba = negocios.filter(n=> n.estatus==='activo' && n.es_prueba);
+
+    document.getElementById('app').innerHTML = `
+      <header class="topbar">
+        <div class="brand">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v17l-2.5-1.5L13 20l-2.5-1.5L8 20l-2-1.5V3z"/><line x1="8.5" y1="7.5" x2="15.5" y2="7.5"/><line x1="8.5" y1="11" x2="15.5" y2="11"/></svg>
+          <span>Panel de Clientes</span>
+        </div>
+        <button type="button" class="btn-ghost btn-sm" id="logoutBtn">Cerrar sesión</button>
+      </header>
+      <main class="content">
+        <div class="summary-row">
+          <button type="button" class="summary-card summary-clickable ${filtroClientes==='activos'?'active-filter':''}" data-filter="activos">
+            <span class="summary-label">Clientes activos</span>
+            <span class="summary-value">${negocios.filter(n=>n.estatus==='activo').length}</span>
+          </button>
+          <button type="button" class="summary-card summary-clickable ${enPrueba.length?'warn':''} ${filtroClientes==='en_prueba'?'active-filter':''}" data-filter="en_prueba">
+            <span class="summary-label">En prueba</span>
+            <span class="summary-value">${enPrueba.length}</span>
+          </button>
+          <button type="button" class="summary-card summary-clickable ${porVencer.length?'warn':''} ${filtroClientes==='por_vencer'?'active-filter':''}" data-filter="por_vencer">
+            <span class="summary-label">Por vencer (3 días o menos)</span>
+            <span class="summary-value">${porVencer.length}</span>
+          </button>
+          <button type="button" class="summary-card summary-clickable ${vencidos.length?'danger':''} ${filtroClientes==='vencidos'?'active-filter':''}" data-filter="vencidos">
+            <span class="summary-label">Vencidos</span>
+            <span class="summary-value">${vencidos.length}</span>
+          </button>
+        </div>
+
+        <div class="panel-header">
+          <h2>Clientes</h2>
+          <button type="button" class="btn-primary" id="newClientBtn">Nuevo cliente</button>
+        </div>
+        ${filtroClientes!=='todos' ? `<p class="filtro-activo-aviso">Mostrando: <strong>${filtroClientes==='activos'?'clientes activos':filtroClientes==='en_prueba'?'en prueba':filtroClientes==='por_vencer'?'por vencer':'vencidos'}</strong> · <button type="button" class="link-btn" id="verTodosBtn">Ver todos</button></p>` : ''}
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th>Negocio</th><th>Giro</th><th>Código</th><th>Estatus</th><th>Próximo pago</th><th>Acciones</th></tr></thead>
+            <tbody id="clientsTableBody"></tbody>
+          </table>
+        </div>
+      </main>`;
+
+    document.getElementById('logoutBtn').addEventListener('click', async ()=>{
+      await supabaseClient.auth.signOut();
+      session = null;
+      renderLogin();
+    });
+    document.getElementById('newClientBtn').addEventListener('click', openNewClientModal);
+    document.querySelectorAll('[data-filter]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const f = btn.dataset.filter;
+        filtroClientes = (filtroClientes===f) ? 'todos' : f;
+        renderApp();
+      });
+    });
+    const verTodosBtn = document.getElementById('verTodosBtn');
+    if(verTodosBtn) verTodosBtn.addEventListener('click', ()=>{ filtroClientes='todos'; renderApp(); });
+    renderClientsTable();
+  }
+
+  function renderClientsTable(){
+    const tbody = document.getElementById('clientsTableBody');
+    if(!tbody) return;
+    const listado = negocios.filter(n=>{
+      const dias = diasRestantes(n.fecha_proximo_pago);
+      if(filtroClientes==='activos') return n.estatus==='activo';
+      if(filtroClientes==='en_prueba') return n.estatus==='activo' && n.es_prueba;
+      if(filtroClientes==='por_vencer') return n.estatus==='activo' && !n.es_prueba && dias!==null && dias<=3 && dias>=0;
+      if(filtroClientes==='vencidos') return n.estatus==='activo' && !n.es_prueba && dias!==null && dias<0;
+      return true;
+    });
+    if(listado.length===0){
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">${negocios.length===0 ? 'Aún no tienes clientes registrados.' : 'Ningún cliente coincide con este filtro.'}</div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = listado.map(n=>{
+      const dias = diasRestantes(n.fecha_proximo_pago);
+      let vencInfo = n.fecha_proximo_pago ? n.fecha_proximo_pago : 'Sin pagos';
+      let vencClass = '';
+      if(n.estatus==='activo' && n.es_prueba && dias!==null){
+        vencInfo += dias<0 ? ` · prueba vencida hace ${Math.abs(dias)} día(s)` : ` · prueba termina en ${dias} día(s)`;
+        vencClass = dias<0 ? 'due-over' : (dias<=3 ? 'due-soon' : '');
+      }else if(n.estatus==='activo' && dias!==null){
+        if(dias<0){ vencInfo += ` · vencido hace ${Math.abs(dias)} día(s)`; vencClass='due-over'; }
+        else if(dias<=3){ vencInfo += ` · vence en ${dias} día(s)`; vencClass='due-soon'; }
+      }
+      return `<tr>
+        <td>${escapeHTML(n.nombre_negocio)}</td>
+        <td>${escapeHTML(n.giro||'—')}</td>
+        <td>${escapeHTML(n.codigo)}</td>
+        <td><span class="status-pill status-${n.estatus}">${n.estatus==='activo'?'Activo':'Suspendido'}</span>${n.estatus==='activo' && n.es_prueba ? ' <span class="status-pill status-prueba">En prueba'+(n.prueba_extendida?' (extendida)':'')+'</span>' : ''}</td>
+        <td class="${vencClass}">${escapeHTML(vencInfo)}</td>
+        <td class="row-actions"><button type="button" class="link-btn" data-open-client="${n.id}">Ver</button></td>
+      </tr>`;
+    }).join('');
+    tbody.querySelectorAll('[data-open-client]').forEach(btn=>{
+      btn.addEventListener('click', ()=> openClientDetail(btn.dataset.openClient));
+    });
+  }
+
+  // ------------------------------------------------------------- Modales
+  function openModal(titleHTML, bodyHTML, footerHTML){
+    document.getElementById('modalRoot').innerHTML = `
+      <div class="modal-overlay" id="modalOverlay">
+        <div class="modal" role="dialog" aria-modal="true">
+          <div class="modal-header"><h3>${titleHTML}</h3><button type="button" class="modal-close" id="modalCloseBtn">×</button></div>
+          <div class="modal-body">${bodyHTML}</div>
+          <div class="modal-footer">${footerHTML}</div>
+        </div>
+      </div>`;
+    document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
+    document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
+  }
+  function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
+
+  function sugerirCodigo(giro, nombre){
+    const base = (giro||nombre||'NEG').toUpperCase().replace(/[^A-Z]/g,'').slice(0,4) || 'NEG';
+    return `${base}-${String(negocios.length+1).padStart(2,'0')}`;
+  }
+
+  function openNewClientModal(){
+    openModal('Nuevo cliente', `
+      <form id="newClientForm" class="form-grid">
+        <label>Nombre del negocio*<input required name="nombre_negocio" type="text" /></label>
+        <label>Giro (farmacia, cafetería, tienda de ropa…)<input name="giro" type="text" /></label>
+        <label>Nombre de contacto<input name="nombre_contacto" type="text" /></label>
+        <label>Teléfono<input name="telefono" type="tel" /></label>
+        <label>Dirección<input name="direccion" type="text" /></label>
+        <label>Logotipo (opcional)<input name="logo" type="file" accept="image/*" /></label>
+        <label>Color de marca<input name="color_primario" type="color" value="#16A34A" style="height:42px; padding:4px;" /></label>
+        <label>Precio mensual*<input required name="precio_mensual" type="number" min="0" step="0.01" value="299" /></label>
+        <label>Fecha de alta<input name="fecha_alta" type="date" value="${todayStr()}" /></label>
+        <label>Código para su punto de venta*<input required name="codigo" type="text" placeholder="Ej. FARM-01" /></label>
+        <label style="flex-direction:row; align-items:center; gap:8px; font-weight:400;">
+          <input type="checkbox" name="es_prueba" checked style="width:auto;" />
+          <span>Periodo de prueba de 15 días (sin cobrar todavía)</span>
+        </label>
+      </form>
+    `, `
+      <button type="button" class="btn-ghost" id="cancelNewClient">Cancelar</button>
+      <button type="button" class="btn-primary" id="saveNewClient">Guardar cliente</button>
+    `);
+    const form = document.getElementById('newClientForm');
+    form.giro.addEventListener('blur', ()=>{ if(!form.codigo.value) form.codigo.value = sugerirCodigo(form.giro.value, form.nombre_negocio.value); });
+    document.getElementById('cancelNewClient').addEventListener('click', closeModal);
+    evitarSubmitNativo(form, 'saveNewClient');
+    document.getElementById('saveNewClient').addEventListener('click', async ()=>{
+      const nombre_negocio = form.nombre_negocio.value.trim();
+      const codigo = form.codigo.value.trim();
+      if(!nombre_negocio || !codigo){ showToast('Nombre y código son obligatorios.', 'warn'); return; }
+      let logo_url = null;
+      const logoFile = form.logo.files[0];
+      if(logoFile){
+        const ext = (logoFile.name.split('.').pop() || 'png').toLowerCase();
+        const path = `${codigo}-${Date.now()}.${ext}`;
+        const { error: upErr } = await supabaseClient.storage.from('logos').upload(path, logoFile, { upsert:true });
+        if(upErr){ showToast('No se pudo subir el logotipo: ' + upErr.message, 'error'); return; }
+        const { data: urlData } = supabaseClient.storage.from('logos').getPublicUrl(path);
+        logo_url = urlData.publicUrl;
+      }
+      const fecha_alta = form.fecha_alta.value || todayStr();
+      const es_prueba = form.es_prueba.checked;
+      const { data: nuevoNegocio, error } = await supabaseClient.from('negocios').insert({
+        nombre_negocio, giro: form.giro.value.trim(), nombre_contacto: form.nombre_contacto.value.trim(),
+        telefono: form.telefono.value.trim(), direccion: form.direccion.value.trim(),
+        precio_mensual: Number(form.precio_mensual.value)||299,
+        codigo, estatus:'activo', logo_url, color_primario: form.color_primario.value,
+        fecha_alta, fecha_proximo_pago: es_prueba ? addDays(fecha_alta, 15) : null,
+        es_prueba, prueba_extendida: false
+      }).select().single();
+      if(error){ showToast(error.message.includes('duplicate') ? 'Ese código ya está en uso.' : 'No se pudo guardar.', 'error'); return; }
+      const codigoLicencia = generarCodigoLicencia();
+      const { error: errLic } = await supabaseClient.from('licencias').insert({ negocio_id: nuevoNegocio.id, codigo: codigoLicencia });
+      if(errLic){ showToast('El cliente se guardó, pero no se pudo generar su licencia. Ve a su ficha para generarla.', 'warn'); }
+      closeModal();
+      showToast('Cliente agregado. Dale el código de negocio y la licencia al instalarle su punto de venta.', 'success');
+      loadDashboard();
+    });
+  }
+
+  function generarCodigoLicencia(){
+    let codigo = '';
+    for(let i=0;i<16;i++){ codigo += Math.floor(Math.random()*10); }
+    return codigo;
+  }
+  function formatearLicencia(codigo){
+    return String(codigo||'').replace(/(.{4})/g,'$1-').replace(/-$/,'');
+  }
+
+  let clienteSubTab = 'pagos';
+
+  async function openClientDetail(negocioId){
+    activeNegocioId = negocioId;
+    const negocio = negocios.find(n=>n.id===negocioId);
+    if(!negocio) return;
+    const [{ data: pagos }, { data: snap }, { data: cajerosCliente }, { data: licenciasCliente }] = await Promise.all([
+      supabaseClient.from('pagos').select('*').eq('negocio_id', negocioId).order('fecha', {ascending:false}),
+      supabaseClient.from('inventario_snapshot').select('*').eq('negocio_id', negocioId).maybeSingle(),
+      supabaseClient.from('cajeros').select('*').eq('negocio_id', negocioId).eq('activo', true).order('nombre'),
+      supabaseClient.from('licencias').select('*').eq('negocio_id', negocioId).order('created_at', {ascending:false})
+    ]);
+    const dias = diasRestantes(negocio.fecha_proximo_pago);
+    clienteSubTab = 'pagos';
+
+    openModal(escapeHTML(negocio.nombre_negocio), `
+      <div class="detail-section">
+        <div class="detail-grid">
+          <div><span>Giro</span>${escapeHTML(negocio.giro||'—')}</div>
+          <div><span>Código</span>${escapeHTML(negocio.codigo)}</div>
+          <div><span>Contacto</span>${escapeHTML(negocio.nombre_contacto||'—')} · ${escapeHTML(negocio.telefono||'—')}</div>
+          <div><span>Fecha de alta</span>${negocio.fecha_alta || '—'}</div>
+          <div><span>Precio mensual</span>${formatMoney(negocio.precio_mensual)}</div>
+          <div><span>Estatus</span><span class="status-pill status-${negocio.estatus}">${negocio.estatus==='activo'?'Activo':'Suspendido'}</span>${negocio.estatus==='activo' && negocio.es_prueba ? ' <span class="status-pill status-prueba">En prueba'+(negocio.prueba_extendida?' (extendida)':'')+'</span>' : ''}</div>
+          <div><span>${negocio.es_prueba ? 'Termina la prueba' : 'Próximo pago'}</span>${negocio.fecha_proximo_pago || 'Sin pagos'}${dias!==null && negocio.estatus==='activo' ? (dias<0 ? ` (vencido hace ${Math.abs(dias)}d)` : ` (${dias}d)`) : ''}</div>
+        </div>
+      </div>
+      <div class="admin-subnav">
+        <button type="button" class="sub-tab-btn active" data-subtab="pagos">Pagos</button>
+        <button type="button" class="sub-tab-btn" data-subtab="inventario">Inventario</button>
+        <button type="button" class="sub-tab-btn" data-subtab="usuarios">Usuarios</button>
+        <button type="button" class="sub-tab-btn" data-subtab="config">Marca y ticket</button>
+        <button type="button" class="sub-tab-btn" data-subtab="reporte">Reporte</button>
+      </div>
+      <div id="clienteSubContent"></div>
+    `, `
+      <button type="button" class="btn-ghost" id="closeDetail">Cerrar</button>
+      ${negocio.estatus==='activo'
+        ? `<button type="button" class="btn-danger" id="suspendBtn">Suspender servicio</button>`
+        : `<button type="button" class="btn-primary" id="reactivateBtn">Reactivar servicio</button>`}
+      ${negocio.estatus==='activo' && negocio.es_prueba && !negocio.prueba_extendida ? `<button type="button" class="btn-secondary" id="extendTrialBtn">Extender prueba (+15 días)</button>` : ''}
+      <button type="button" class="btn-primary" id="registerPaymentBtn">Registrar pago</button>
+    `);
+
+    document.getElementById('closeDetail').addEventListener('click', closeModal);
+    document.getElementById('registerPaymentBtn').addEventListener('click', ()=> openPaymentModal(negocio));
+    const suspendBtn = document.getElementById('suspendBtn');
+    if(suspendBtn) suspendBtn.addEventListener('click', ()=> toggleEstatus(negocio, 'suspendido'));
+    const reactivateBtn = document.getElementById('reactivateBtn');
+    if(reactivateBtn) reactivateBtn.addEventListener('click', ()=> toggleEstatus(negocio, 'activo'));
+    const extendTrialBtn = document.getElementById('extendTrialBtn');
+    if(extendTrialBtn) extendTrialBtn.addEventListener('click', ()=> extenderPrueba(negocio));
+
+    let cajerosState = cajerosCliente || [];
+    let licenciasState = licenciasCliente || [];
+    document.querySelectorAll('[data-subtab]').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        clienteSubTab = btn.dataset.subtab;
+        document.querySelectorAll('[data-subtab]').forEach(b=> b.classList.toggle('active', b.dataset.subtab===clienteSubTab));
+        renderClienteSubContent(negocio, pagos, snap, cajerosState, licenciasState);
+      });
+    });
+    renderClienteSubContent(negocio, pagos, snap, cajerosState, licenciasState);
+  }
+
+  function renderClienteSubContent(negocio, pagos, snap, cajeros, licencias){
+    const el = document.getElementById('clienteSubContent');
+    if(!el) return;
+
+    if(clienteSubTab==='pagos'){
+      el.innerHTML = `
+        <div class="detail-section">
+          <div class="form-grid" style="flex-direction:row; gap:10px; align-items:flex-end; margin-bottom:14px;">
+            <label style="flex:1;">Desde<input id="pagosDesde" type="date" /></label>
+            <label style="flex:1;">Hasta<input id="pagosHasta" type="date" /></label>
+          </div>
+          <div id="pagosTablaWrap"></div>
+        </div>`;
+      const desdeInput = document.getElementById('pagosDesde');
+      const hastaInput = document.getElementById('pagosHasta');
+      const renderTablaPagos = ()=>{
+        const desde = desdeInput.value;
+        const hasta = hastaInput.value;
+        const filtrados = (pagos||[]).filter(p=> (!desde || p.fecha>=desde) && (!hasta || p.fecha<=hasta));
+        const total = filtrados.reduce((s,p)=> s+Number(p.monto), 0);
+        document.getElementById('pagosTablaWrap').innerHTML = `
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th>Fecha</th><th>Método</th><th>Cubre hasta</th><th class="num">Monto</th></tr></thead>
+              <tbody>${filtrados.length ? filtrados.map(p=>`<tr><td>${p.fecha}</td><td>${escapeHTML(p.metodo||'—')}</td><td>${p.cubre_hasta}</td><td class="num">${formatMoney(p.monto)}</td></tr>`).join('') : '<tr><td colspan="4"><div class="empty-state">Sin pagos en este rango.</div></td></tr>'}</tbody>
+            </table>
+          </div>
+          ${filtrados.length ? `<p style="font-size:.85rem; margin-top:10px;"><strong>Total: ${formatMoney(total)}</strong></p>` : ''}
+        `;
+      };
+      desdeInput.addEventListener('change', renderTablaPagos);
+      hastaInput.addEventListener('change', renderTablaPagos);
+      renderTablaPagos();
+
+    }else if(clienteSubTab==='inventario'){
+      const productos = (snap && snap.productos) || [];
+      const valorTotal = productos.reduce((s,p)=> s + (Number(p.cost)||0)*(Number(p.stock)||0), 0);
+      const filas = productos.map(p=>`<tr><td>${escapeHTML(p.name)}</td><td class="num">${formatMoney(p.cost||0)}</td><td class="num">${p.stock}</td><td class="num">${formatMoney((p.cost||0)*p.stock)}</td></tr>`).join('');
+      el.innerHTML = `
+        <div class="detail-section">
+          <div class="panel-header" style="margin-bottom:10px;">
+            <p style="font-size:.82rem; color:var(--ink-soft); margin:0;">${snap && snap.updated_at ? 'Última actualización: '+new Date(snap.updated_at).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'}) : 'Sin respaldo de inventario todavía.'}</p>
+            <button type="button" class="btn-secondary btn-sm" id="exportarInventarioBtn" ${productos.length?'':'disabled'}>Exportar a Excel</button>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th>Producto</th><th class="num">Costo</th><th class="num">Existencia</th><th class="num">Valor</th></tr></thead>
+              <tbody>${filas || '<tr><td colspan="4"><div class="empty-state">Sin datos de inventario todavía.</div></td></tr>'}</tbody>
+            </table>
+          </div>
+          ${productos.length ? `<p style="font-size:.85rem; margin-top:10px;"><strong>Valor total: ${formatMoney(valorTotal)}</strong></p>` : ''}
+        </div>
+        <div class="detail-section">
+          <h4>Ventas por producto</h4>
+          <div class="form-grid" style="flex-direction:row; gap:10px; align-items:flex-end;">
+            <label style="flex:1;">Desde<input id="invVentasDesde" type="date" /></label>
+            <label style="flex:1;">Hasta<input id="invVentasHasta" type="date" /></label>
+            <button type="button" class="btn-secondary btn-sm" id="generarVentasProductoBtn">Generar</button>
+          </div>
+          <div id="ventasProductoOutput"></div>
+        </div>`;
+      const exportBtn = document.getElementById('exportarInventarioBtn');
+      if(exportBtn) exportBtn.addEventListener('click', ()=> exportarInventarioExcel(negocio, productos));
+      const invDesde = document.getElementById('invVentasDesde');
+      const invHasta = document.getElementById('invVentasHasta');
+      invHasta.value = todayStr();
+      invDesde.value = addMonths(todayStr(), -1);
+      document.getElementById('generarVentasProductoBtn').addEventListener('click', ()=> generarVentasPorProducto(negocio.id, invDesde.value, invHasta.value));
+      generarVentasPorProducto(negocio.id, invDesde.value, invHasta.value);
+
+    }else if(clienteSubTab==='config'){
+      el.innerHTML = `
+        <div class="detail-section">
+          <h4>Ticket y marca</h4>
+          <div class="marca-row">
+            <div class="marca-field">
+              <label for="editDireccion">Dirección</label>
+              <input id="editDireccion" type="text" value="${escapeHTML(negocio.direccion||'')}" />
+            </div>
+            <div class="marca-field">
+              <label>Logotipo</label>
+              <div class="logo-uploader">
+                ${negocio.logo_url ? `<img src="${negocio.logo_url}" alt="Logo actual" class="logo-preview" />` : `<div class="logo-preview logo-preview-empty">Sin logo</div>`}
+                <label class="btn-secondary btn-sm" style="cursor:pointer;">Cambiar
+                  <input id="editLogoFile" type="file" accept="image/*" style="display:none;" />
+                </label>
+              </div>
+            </div>
+            <div class="marca-field">
+              <label for="editColorPrimario">Color de marca</label>
+              <div class="color-row">
+                <input id="editColorPrimario" type="color" value="${negocio.color_primario || '#16A34A'}" />
+                <span id="colorHexLabel" class="mono">${(negocio.color_primario || '#16A34A').toUpperCase()}</span>
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn-secondary btn-sm" id="saveTicketInfoBtn" style="margin-top:16px;">Guardar cambios</button>
+          <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--line);">
+            <span class="summary-label">Datos completos en el ticket</span>
+            <p style="font-size:.85rem; margin:4px 0 10px;">${negocio.mostrar_datos_ticket ? 'Autorizado: el ticket muestra logo, dirección y teléfono.' : 'No autorizado: el ticket solo muestra el nombre del negocio.'}</p>
+            <button type="button" class="btn-${negocio.mostrar_datos_ticket ? 'ghost' : 'primary'} btn-sm" id="toggleTicketAuthBtn">${negocio.mostrar_datos_ticket ? 'Quitar autorización' : 'Autorizar'}</button>
+          </div>
+        </div>
+        <div class="detail-section">
+          <h4>Facturación</h4>
+          <p style="font-size:.85rem; margin:0 0 10px; color:var(--ink-soft);">${negocio.facturacion_habilitada ? 'Activada: al cobrar, el punto de venta le pregunta al cliente final si requiere factura y le pide sus datos fiscales.' : 'Desactivada: el punto de venta no ofrece la opción de factura.'}</p>
+          <p style="font-size:.78rem; margin:0 0 10px; color:var(--ink-soft);">Esto guarda la solicitud (RFC, razón social, etc.) para que tú la proceses después — todavía no timbra la factura de forma automática.</p>
+          <button type="button" class="btn-${negocio.facturacion_habilitada ? 'ghost' : 'primary'} btn-sm" id="toggleFacturacionBtn">${negocio.facturacion_habilitada ? 'Desactivar facturación' : 'Activar facturación'}</button>
+        </div>`;
+      document.getElementById('saveTicketInfoBtn').addEventListener('click', async ()=>{
+        const direccion = document.getElementById('editDireccion').value.trim();
+        const color_primario = document.getElementById('editColorPrimario').value;
+        const file = document.getElementById('editLogoFile').files[0];
+        let logo_url = negocio.logo_url;
+        if(file){
+          const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+          const path = `${negocio.codigo}-${Date.now()}.${ext}`;
+          const { error: upErr } = await supabaseClient.storage.from('logos').upload(path, file, { upsert:true });
+          if(upErr){ showToast('No se pudo subir el logotipo: ' + upErr.message, 'error'); return; }
+          const { data: urlData } = supabaseClient.storage.from('logos').getPublicUrl(path);
+          logo_url = urlData.publicUrl;
+        }
+        const { error } = await supabaseClient.from('negocios').update({ direccion, logo_url, color_primario }).eq('id', negocio.id);
+        if(error){ showToast('No se pudo guardar.', 'error'); return; }
+        showToast('Datos actualizados.', 'success');
+        closeModal();
+        loadDashboard();
+      });
+      document.getElementById('toggleTicketAuthBtn').addEventListener('click', async ()=>{
+        const nuevoValor = !negocio.mostrar_datos_ticket;
+        const { error } = await supabaseClient.from('negocios').update({ mostrar_datos_ticket: nuevoValor }).eq('id', negocio.id);
+        if(error){ showToast('No se pudo actualizar.', 'error'); return; }
+        showToast(nuevoValor ? 'Autorizado: su ticket ya puede mostrar logo, dirección y teléfono.' : 'Autorización retirada.', 'success');
+        closeModal();
+        loadDashboard();
+      });
+      document.getElementById('toggleFacturacionBtn').addEventListener('click', async ()=>{
+        const nuevoValor = !negocio.facturacion_habilitada;
+        const { error } = await supabaseClient.from('negocios').update({ facturacion_habilitada: nuevoValor }).eq('id', negocio.id);
+        if(error){ showToast('No se pudo actualizar.', 'error'); return; }
+        showToast(nuevoValor ? 'Facturación activada para este negocio.' : 'Facturación desactivada.', 'success');
+        closeModal();
+        loadDashboard();
+      });
+      const colorInput = document.getElementById('editColorPrimario');
+      const colorLabel = document.getElementById('colorHexLabel');
+      colorInput.addEventListener('input', ()=>{ colorLabel.textContent = colorInput.value.toUpperCase(); });
+
+    }else if(clienteSubTab==='usuarios'){
+      el.innerHTML = `
+        <div class="detail-section">
+          <h4>PIN de administrador</h4>
+          <p style="font-size:.85rem; color:var(--ink-soft); margin:0 0 10px;">Es el PIN que el dueño usa dentro de su punto de venta para entrar a Administración. Si no lo recuerda, puedes verlo aquí o ponerle uno nuevo.</p>
+          <div class="pin-reveal-row">
+            <span class="mono" id="pinActualLabel" data-revelado="false">${negocio.admin_pin ? '••••••' : 'Sin PIN configurado todavía'}</span>
+            ${negocio.admin_pin ? `<button type="button" class="link-btn" id="verPinBtn" data-pin="${escapeHTML(negocio.admin_pin)}">Ver</button>` : ''}
+          </div>
+          <div class="form-grid" style="flex-direction:row; gap:10px; align-items:flex-end; margin-top:12px;">
+            <label style="flex:1;">Nuevo PIN (mínimo 4 dígitos)<input id="nuevoPinInput" type="text" inputmode="numeric" minlength="4" autocomplete="off" /></label>
+            <button type="button" class="btn-secondary btn-sm" id="resetPinBtn">Guardar PIN</button>
+          </div>
+        </div>
+        <div class="detail-section">
+          <h4>Cajeros y supervisores</h4>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th>Nombre</th><th>Código</th><th>Rol</th><th>Acciones</th></tr></thead>
+              <tbody id="usuariosCajerosBody">${cajeros.length ? cajeros.map(c=>`<tr>
+                <td>${escapeHTML(c.nombre)}</td>
+                <td class="mono"><span class="codigo-oculto-admin" data-revelado="false">••••••</span></td>
+                <td>${c.rol==='supervisor' ? '<span class="status-pill status-activo">Supervisor</span>' : 'Cajero'}</td>
+                <td class="row-actions">
+                  <button type="button" class="link-btn" data-ver-codigo="${escapeHTML(c.codigo)}">Ver código</button>
+                  <button type="button" class="link-btn" data-editar-cajero="${c.id}">Editar</button>
+                  <button type="button" class="link-btn" data-eliminar-cajero="${c.id}" data-nombre="${escapeHTML(c.nombre)}">Eliminar</button>
+                </td>
+              </tr>`).join('') : `<tr><td colspan="4"><div class="empty-state">Este negocio no tiene cajeros registrados.</div></td></tr>`}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="detail-section">
+          <h4>Licencia de instalación</h4>
+          <p style="font-size:.85rem; color:var(--ink-soft); margin:0 0 10px;">Código de 16 dígitos que el punto de venta pide una sola vez al instalarlo. Si la desactivas, deja de funcionar.</p>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th>Código</th><th>Estado</th><th>Activada</th><th>Acciones</th></tr></thead>
+              <tbody id="licenciasBody">${licencias.length ? licencias.map(l=>`<tr>
+                <td class="mono">${escapeHTML(formatearLicencia(l.codigo))}</td>
+                <td><span class="status-pill status-${l.activa?'activo':'suspendido'}">${l.activa?'Activa':'Desactivada'}</span></td>
+                <td>${l.fecha_activada ? new Date(l.fecha_activada).toLocaleDateString('es-MX') : 'Aún no activada'}</td>
+                <td class="row-actions">
+                  <button type="button" class="link-btn" data-toggle-licencia="${l.id}" data-activa="${l.activa}">${l.activa?'Desactivar':'Reactivar'}</button>
+                </td>
+              </tr>`).join('') : `<tr><td colspan="4"><div class="empty-state">Este negocio no tiene licencia generada.</div></td></tr>`}</tbody>
+            </table>
+          </div>
+          <button type="button" class="btn-secondary btn-sm" id="generarLicenciaBtn" style="margin-top:12px;">Generar nueva licencia</button>
+        </div>`;
+
+      const verPinBtn = document.getElementById('verPinBtn');
+      if(verPinBtn){
+        verPinBtn.addEventListener('click', ()=>{
+          const label = document.getElementById('pinActualLabel');
+          const revelado = label.dataset.revelado==='true';
+          label.textContent = revelado ? '••••••' : verPinBtn.dataset.pin;
+          label.dataset.revelado = revelado ? 'false' : 'true';
+          verPinBtn.textContent = revelado ? 'Ver' : 'Ocultar';
+        });
+      }
+      document.getElementById('resetPinBtn').addEventListener('click', async ()=>{
+        const nuevoPin = document.getElementById('nuevoPinInput').value.trim();
+        if(nuevoPin.length<4){ showToast('El PIN debe tener al menos 4 dígitos.', 'warn'); return; }
+        const { error } = await supabaseClient.from('negocios').update({ admin_pin: nuevoPin }).eq('id', negocio.id);
+        if(error){ showToast('No se pudo actualizar el PIN.', 'error'); return; }
+        negocio.admin_pin = nuevoPin;
+        showToast('PIN actualizado. Avísale al cliente su nuevo PIN.', 'success');
+        renderClienteSubContent(negocio, pagos, snap, cajeros, licencias);
+      });
+      el.querySelectorAll('[data-ver-codigo]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const span = btn.closest('tr').querySelector('.codigo-oculto-admin');
+          const revelado = span.dataset.revelado==='true';
+          span.textContent = revelado ? '••••••' : btn.dataset.verCodigo;
+          span.dataset.revelado = revelado ? 'false' : 'true';
+          btn.textContent = revelado ? 'Ver código' : 'Ocultar';
+        });
+      });
+      el.querySelectorAll('[data-editar-cajero]').forEach(btn=>{
+        btn.addEventListener('click', ()=> abrirEditarCajeroModal(negocio, pagos, snap, cajeros, licencias, btn.dataset.editarCajero));
+      });
+      el.querySelectorAll('[data-eliminar-cajero]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          if(!confirm(`¿Eliminar a ${btn.dataset.nombre} como cajero de este negocio?`)) return;
+          const { error } = await supabaseClient.from('cajeros').update({ activo:false }).eq('id', btn.dataset.eliminarCajero);
+          if(error){ showToast('No se pudo eliminar.', 'error'); return; }
+          const idx = cajeros.findIndex(c=>c.id===btn.dataset.eliminarCajero);
+          if(idx>-1) cajeros.splice(idx,1);
+          showToast('Cajero eliminado.', 'success');
+          renderClienteSubContent(negocio, pagos, snap, cajeros, licencias);
+        });
+      });
+      el.querySelectorAll('[data-toggle-licencia]').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const activaActual = btn.dataset.activa === 'true';
+          const { error } = await supabaseClient.from('licencias').update({ activa: !activaActual }).eq('id', btn.dataset.toggleLicencia);
+          if(error){ showToast('No se pudo actualizar la licencia.', 'error'); return; }
+          const lic = licencias.find(l=>l.id===btn.dataset.toggleLicencia);
+          if(lic) lic.activa = !activaActual;
+          showToast(activaActual ? 'Licencia desactivada.' : 'Licencia reactivada.', 'success');
+          renderClienteSubContent(negocio, pagos, snap, cajeros, licencias);
+        });
+      });
+      document.getElementById('generarLicenciaBtn').addEventListener('click', async ()=>{
+        const nuevoCodigo = generarCodigoLicencia();
+        const { data, error } = await supabaseClient.from('licencias').insert({ negocio_id: negocio.id, codigo: nuevoCodigo }).select().single();
+        if(error){ showToast('No se pudo generar la licencia.', 'error'); return; }
+        licencias.unshift(data);
+        showToast('Nueva licencia generada.', 'success');
+        renderClienteSubContent(negocio, pagos, snap, cajeros, licencias);
+      });
+
+    }else if(clienteSubTab==='reporte'){
+      el.innerHTML = `
+        <div class="detail-section">
+          <div class="form-grid" style="flex-direction:row; gap:10px; align-items:flex-end;">
+            <label style="flex:1;">Desde<input id="reportFrom" type="date" /></label>
+            <label style="flex:1;">Hasta<input id="reportTo" type="date" /></label>
+            <button type="button" class="btn-secondary btn-sm" id="genReportBtn">Generar</button>
+          </div>
+          <div id="reportOutput"></div>
+        </div>`;
+      const from = document.getElementById('reportFrom');
+      const to = document.getElementById('reportTo');
+      to.value = todayStr();
+      from.value = addMonths(todayStr(), -1);
+      document.getElementById('genReportBtn').addEventListener('click', ()=> generarReporte(negocio.id, from.value, to.value));
+    }
+  }
+
+  function exportarInventarioExcel(negocio, productos){
+    if(typeof XLSX === 'undefined'){ showToast('No se pudo cargar el generador de Excel.', 'error'); return; }
+    const datos = [['Nombre','Categoría','SKU','Precio','Costo','Existencia','Stock mínimo']];
+    productos.forEach(p=> datos.push([p.name||'', p.category||'', p.sku||'', p.price||0, p.cost||0, p.stock||0, p.minStock||'']));
+    const ws = XLSX.utils.aoa_to_sheet(datos);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Inventario');
+    XLSX.writeFile(wb, `inventario_${negocio.codigo}_${todayStr()}.xlsx`);
+  }
+
+  async function generarVentasPorProducto(negocioId, desde, hasta){
+    const output = document.getElementById('ventasProductoOutput');
+    if(!output) return;
+    output.innerHTML = '<p style="color:var(--ink-soft); margin-top:10px;">Calculando…</p>';
+    const { data: ventas, error } = await supabaseClient.from('ventas').select('*')
+      .eq('negocio_id', negocioId)
+      .gte('fecha_hora', desde+'T00:00:00').lte('fecha_hora', hasta+'T23:59:59');
+    if(error){ output.innerHTML = '<p class="error-text">No se pudo generar.</p>'; return; }
+    const ventasList = (ventas||[]).filter(v=> !v.cancelada);
+    const porProducto = {};
+    ventasList.forEach(v=>{
+      const subtotalOriginal = Number(v.subtotal_antes_descuento) || Number(v.total);
+      const factor = subtotalOriginal>0 ? (Number(v.total)/subtotalOriginal) : 1;
+      (v.items||[]).forEach(it=>{
+        if(!porProducto[it.name]) porProducto[it.name] = { cantidad:0, ingreso:0, costo:0, precioUnit:0, costoUnit:0 };
+        porProducto[it.name].cantidad += it.qty;
+        porProducto[it.name].ingreso += it.price*it.qty*factor;
+        porProducto[it.name].costo += (Number(it.cost)||0)*it.qty;
+        porProducto[it.name].precioUnit = it.price;
+        porProducto[it.name].costoUnit = Number(it.cost)||0;
+      });
+    });
+    const filas = Object.keys(porProducto).sort((a,b)=> porProducto[b].ingreso-porProducto[a].ingreso).map(nombre=>{
+      const p = porProducto[nombre];
+      return `<tr><td>${escapeHTML(nombre)}</td><td class="num">${p.cantidad}</td><td class="num">${formatMoney(p.costoUnit)}</td><td class="num">${formatMoney(p.precioUnit)}</td><td class="num">${formatMoney(p.ingreso)}</td><td class="num">${formatMoney(p.costo)}</td><td class="num">${formatMoney(p.ingreso-p.costo)}</td></tr>`;
+    }).join('');
+    output.innerHTML = `
+      <div class="table-scroll" style="margin-top:10px;">
+        <table class="data-table">
+          <thead><tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Costo unit.</th><th class="num">Precio venta</th><th class="num">Ingreso</th><th class="num">Costo</th><th class="num">Ganancia</th></tr></thead>
+          <tbody>${filas || '<tr><td colspan="7"><div class="empty-state">Sin ventas en este periodo.</div></td></tr>'}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function abrirEditarCajeroModal(negocio, pagos, snap, cajeros, licencias, cajeroId){
+    const c = cajeros.find(x=>x.id===cajeroId);
+    if(!c) return;
+    openModal('Editar cajero', `
+      <form id="editarCajeroForm" class="form-grid">
+        <label>Nombre*<input required name="nombre" type="text" value="${escapeHTML(c.nombre)}" /></label>
+        <label>Código único*<input required name="codigo" type="text" value="${escapeHTML(c.codigo)}" autocomplete="off" /></label>
+        <label style="flex-direction:row; align-items:center; gap:8px; font-weight:400;">
+          <input type="checkbox" name="supervisor" style="width:auto;" ${c.rol==='supervisor'?'checked':''} />
+          <span>Permisos de supervisor</span>
+        </label>
+      </form>
+    `, `
+      <button type="button" class="btn-ghost" data-action="close-modal">Cancelar</button>
+      <button type="button" class="btn-primary" id="guardarEditarCajeroBtn">Guardar</button>
+    `);
+    evitarSubmitNativo(document.getElementById('editarCajeroForm'), 'guardarEditarCajeroBtn');
+    document.getElementById('guardarEditarCajeroBtn').addEventListener('click', async ()=>{
+      const form = document.getElementById('editarCajeroForm');
+      const nombre = form.nombre.value.trim();
+      const codigo = form.codigo.value.trim();
+      const rol = form.supervisor.checked ? 'supervisor' : 'cajero';
+      if(!nombre || !codigo){ showToast('Nombre y código son obligatorios.', 'warn'); return; }
+      const { error } = await supabaseClient.from('cajeros').update({ nombre, codigo, rol }).eq('id', c.id);
+      if(error){
+        showToast((error.message||'').includes('duplicate') ? 'Ese código ya está en uso.' : 'No se pudo guardar.', 'error');
+        return;
+      }
+      Object.assign(c, { nombre, codigo, rol });
+      closeModal();
+      showToast('Cajero actualizado.', 'success');
+      renderClienteSubContent(negocio, pagos, snap, cajeros, licencias);
+    });
+  }
+
+  async function toggleEstatus(negocio, nuevoEstatus){
+    const { error } = await supabaseClient.from('negocios').update({ estatus: nuevoEstatus }).eq('id', negocio.id);
+    if(error){ showToast('No se pudo actualizar el estatus.', 'error'); return; }
+    showToast(nuevoEstatus==='suspendido' ? 'Servicio suspendido.' : 'Servicio reactivado.', 'success');
+    closeModal();
+    loadDashboard();
+  }
+
+  async function extenderPrueba(negocio){
+    if(negocio.prueba_extendida){ showToast('Ese cliente ya usó su extensión de prueba.', 'warn'); return; }
+    const nuevaFecha = addDays(negocio.fecha_proximo_pago || todayStr(), 15);
+    const { error } = await supabaseClient.from('negocios').update({ prueba_extendida: true, fecha_proximo_pago: nuevaFecha }).eq('id', negocio.id);
+    if(error){ showToast('No se pudo extender la prueba.', 'error'); return; }
+    showToast(`Prueba extendida hasta el ${nuevaFecha}.`, 'success');
+    closeModal();
+    loadDashboard();
+  }
+
+  function openPaymentModal(negocio){
+    openModal('Registrar pago', `
+      <form id="paymentForm" class="form-grid">
+        <label>Monto*<input required name="monto" type="number" min="0" step="0.01" value="${negocio.precio_mensual}" /></label>
+        <label>Método<select name="metodo"><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option><option value="terminal">Terminal bancaria</option></select></label>
+        <label>Fecha de pago<input name="fecha" type="date" value="${todayStr()}" /></label>
+        <label>Deja cubierto el servicio hasta*<input required name="cubre_hasta" type="date" value="${addMonths(negocio.fecha_proximo_pago || todayStr(), 1)}" /></label>
+      </form>
+    `, `
+      <button type="button" class="btn-ghost" id="cancelPayment">Cancelar</button>
+      <button type="button" class="btn-primary" id="savePayment">Guardar pago</button>
+    `);
+    document.getElementById('cancelPayment').addEventListener('click', closeModal);
+    evitarSubmitNativo(document.getElementById('paymentForm'), 'savePayment');
+    document.getElementById('savePayment').addEventListener('click', async ()=>{
+      const form = document.getElementById('paymentForm');
+      const monto = Number(form.monto.value);
+      const cubre_hasta = form.cubre_hasta.value;
+      if(!(monto>0) || !cubre_hasta){ showToast('Revisa el monto y la fecha.', 'warn'); return; }
+      const { error: err1 } = await supabaseClient.from('pagos').insert({
+        negocio_id: negocio.id, monto, metodo: form.metodo.value, fecha: form.fecha.value, cubre_hasta
+      });
+      if(err1){ showToast('No se pudo guardar el pago.', 'error'); return; }
+      const { error: err2 } = await supabaseClient.from('negocios').update({ fecha_proximo_pago: cubre_hasta, estatus:'activo', es_prueba:false }).eq('id', negocio.id);
+      if(err2){ showToast('El pago se guardó, pero no se pudo actualizar la fecha del negocio.', 'warn'); }
+      closeModal();
+      showToast('Pago registrado.', 'success');
+      loadDashboard();
+    });
+  }
+
+  async function generarReporte(negocioId, desde, hasta){
+    const output = document.getElementById('reportOutput');
+    output.innerHTML = '<p>Calculando…</p>';
+    const desdeISO = desde + 'T00:00:00';
+    const hastaISO = hasta + 'T23:59:59';
+    const [{ data: ventas, error: e1 }, { data: movs, error: e2 }, { data: snap, error: e3 }] = await Promise.all([
+      supabaseClient.from('ventas').select('*').eq('negocio_id', negocioId).gte('fecha_hora', desdeISO).lte('fecha_hora', hastaISO),
+      supabaseClient.from('movimientos_inventario').select('*').eq('negocio_id', negocioId).gte('fecha_hora', desdeISO).lte('fecha_hora', hastaISO),
+      supabaseClient.from('inventario_snapshot').select('*').eq('negocio_id', negocioId).maybeSingle()
+    ]);
+    if(e1 || e2){ output.innerHTML = '<p class="error-text">No se pudo generar el reporte.</p>'; return; }
+    const ventasList = (ventas || []).filter(v=> !v.cancelada);
+    const ingreso = ventasList.reduce((s,v)=> s+Number(v.total), 0);
+    const costoVendido = ventasList.reduce((s,v)=> s + (v.items||[]).reduce((s2,it)=> s2 + (Number(it.cost)||0)*Number(it.qty), 0), 0);
+    const ganancia = ingreso - costoVendido;
+    const inversion = (movs||[]).reduce((s,m)=> s + Number(m.cantidad)*(Number(m.costo_unitario)||0), 0);
+    const productos = (snap && snap.productos) || [];
+    const valorInventario = productos.reduce((s,p)=> s + (Number(p.cost)||0)*(Number(p.stock)||0), 0);
+    const inventarioFilas = productos.map(p=>`<tr><td>${escapeHTML(p.name)}</td><td class="num">${formatMoney(p.cost||0)}</td><td class="num">${p.stock}</td><td class="num">${formatMoney((p.cost||0)*p.stock)}</td></tr>`).join('');
+    const facturasPendientes = ventasList.filter(v=> v.requiere_factura);
+    const facturasFilas = facturasPendientes.map(v=>{
+      const df = v.datos_fiscales || {};
+      return `<tr>
+        <td class="mono">${escapeHTML(v.folio)}</td>
+        <td>${escapeHTML(df.razon_social||'—')}</td>
+        <td class="mono">${escapeHTML(df.rfc||'—')}</td>
+        <td>${escapeHTML(df.correo||'—')}</td>
+        <td class="num">${formatMoney(v.total)}</td>
+      </tr>`;
+    }).join('');
+
+    output.innerHTML = `
+      <div class="report-grid">
+        <div class="report-card"><span class="summary-label">Ventas (${ventasList.length})</span><div class="v">${formatMoney(ingreso)}</div></div>
+        <div class="report-card"><span class="summary-label">Ganancia bruta</span><div class="v">${formatMoney(ganancia)}</div></div>
+        <div class="report-card"><span class="summary-label">Invertido en mercancía</span><div class="v">${formatMoney(inversion)}</div></div>
+        <div class="report-card"><span class="summary-label">Costo de lo vendido</span><div class="v">${formatMoney(costoVendido)}</div></div>
+        <div class="report-card"><span class="summary-label">Valor del inventario actual</span><div class="v">${formatMoney(valorInventario)}</div></div>
+      </div>
+      <h4 style="margin-top:16px; font-family:'Space Grotesk',sans-serif; font-size:.9rem;">Inventario teórico actual (para contar físicamente)</h4>
+      <div class="table-scroll" style="margin-top:8px;">
+        <table class="data-table">
+          <thead><tr><th>Producto</th><th class="num">Costo unit.</th><th class="num">Debería tener</th><th class="num">Valor</th></tr></thead>
+          <tbody>${inventarioFilas || '<tr><td colspan="4"><div class="empty-state">Sin datos de inventario todavía.</div></td></tr>'}</tbody>
+        </table>
+      </div>
+      <h4 style="margin-top:16px; font-family:'Space Grotesk',sans-serif; font-size:.9rem;">Facturas solicitadas en este periodo (${facturasPendientes.length})</h4>
+      <div class="table-scroll" style="margin-top:8px;">
+        <table class="data-table">
+          <thead><tr><th>Folio</th><th>Razón social</th><th>RFC</th><th>Correo</th><th class="num">Total</th></tr></thead>
+          <tbody>${facturasFilas || '<tr><td colspan="5"><div class="empty-state">Nadie pidió factura en este periodo.</div></td></tr>'}</tbody>
+        </table>
+      </div>
+      <p style="font-size:.78rem; color:var(--ink-soft); margin-top:10px;">El inventario es la foto más reciente que mandó el punto de venta, no de la fecha exacta "hasta"; las ventas y la inversión sí corresponden al rango elegido.</p>
+    `;
+  }
+
+  // ------------------------------------------------------------- Arranque
+  (async function boot(){
+    if(!cloudEnabled || !supabaseClient){ renderNotConfigured(); return; }
+    const { data } = await supabaseClient.auth.getSession();
+    if(data && data.session){ session = data.session; loadDashboard(); }
+    else{ renderLogin(); }
+  })();
+</script>
+</body>
+</html>

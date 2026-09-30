@@ -1,0 +1,26 @@
+{
+  "name": "Oram Escáner",
+  "short_name": "Oram Escáner",
+  "description": "Escáner remoto para vender — celular como pistola lectora.",
+  "start_url": "./",
+  "scope": "./",
+  "id": "./",
+  "display": "standalone",
+  "background_color": "#F3FBF6",
+  "theme_color": "#16A34A",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-escaner-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-escaner-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

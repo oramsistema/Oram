@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Escáner · Punto de Venta</title>
+<link rel="manifest" href="manifest-escaner.json">
+<meta name="theme-color" content="#16A34A">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root{
+    --bg:#F3FBF6; --surface:#FFFFFF; --surface-alt:#EAFBF1;
+    --ink:#152A1E; --ink-soft:#5D7368;
+    --green-500:#22C55E; --green-600:#16A34A; --green-700:#127A3A; --green-100:#D8F7E4;
+    --line:#DFEFE5; --red:#DC2626; --red-bg:#FDECEC; --amber:#B45309; --amber-bg:#FEF3C7;
+    --radius-sm:8px; --radius-md:14px; --radius-lg:20px;
+    --shadow:0 1px 2px rgba(21,42,30,.06), 0 12px 28px -16px rgba(21,42,30,.22);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0E1712; --surface:#142019; --surface-alt:#16281F; --ink:#EAF3EC; --ink-soft:#9FB6A8;
+      --green-500:#34D399; --green-600:#22C55E; --green-700:#3ADB86; --green-100:#1C3A2A;
+      --line:#223226; --red:#F87171; --red-bg:#3B1616; --amber:#FBBF24; --amber-bg:#3A2A0E;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0E1712; --surface:#142019; --surface-alt:#16281F; --ink:#EAF3EC; --ink-soft:#9FB6A8;
+    --green-500:#34D399; --green-600:#22C55E; --green-700:#3ADB86; --green-100:#1C3A2A;
+    --line:#223226; --red:#F87171; --red-bg:#3B1616; --amber:#FBBF24; --amber-bg:#3A2A0E;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; height:100%; }
+  body{ background:var(--bg); color:var(--ink); font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh; }
+  h1,h2{ font-family:'Space Grotesk',sans-serif; margin:0; }
+  button,input{ font-family:inherit; }
+  :focus-visible{ outline:2px solid var(--green-600); outline-offset:2px; }
+
+  .wrap{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+  .card{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); box-shadow:var(--shadow); padding:32px; width:100%; max-width:380px; }
+  .card h1{ font-size:1.3rem; margin-bottom:6px; text-align:center; }
+  .card p.sub{ color:var(--ink-soft); font-size:.88rem; text-align:center; margin:0 0 22px; }
+  .form-grid{ display:flex; flex-direction:column; gap:14px; }
+  .form-grid label{ display:flex; flex-direction:column; gap:6px; font-size:.85rem; font-weight:600; color:var(--ink-soft); }
+  .form-grid input{ padding:11px 12px; border:1px solid var(--line); border-radius:8px; font-size:1rem; color:var(--ink); background:var(--surface); }
+  .btn-primary{ background:var(--green-600); color:#fff; border:none; padding:13px 20px; border-radius:var(--radius-sm); font-weight:700; cursor:pointer; font-size:1rem; width:100%; }
+  .btn-primary:hover{ background:var(--green-700); }
+  .btn-primary:disabled{ background:var(--line); color:var(--ink-soft); cursor:not-allowed; }
+  .error-text{ color:var(--red); font-size:.85rem; margin-top:12px; text-align:center; }
+  .info-text{ color:var(--ink-soft); font-size:.85rem; margin-top:12px; text-align:center; }
+
+  /* ---------- Pantalla de escaneo ---------- */
+  .scan-screen{ position:fixed; inset:0; background:#000; display:flex; flex-direction:column; }
+  .scan-topbar{ display:flex; align-items:center; justify-content:space-between; padding:14px 16px; color:#fff; }
+  .scan-topbar .who{ font-size:.85rem; opacity:.85; }
+  .scan-exit{ background:rgba(255,255,255,.15); border:none; color:#fff; padding:8px 14px; border-radius:999px; font-size:.82rem; font-weight:600; cursor:pointer; }
+  .scan-video{ flex:1; width:100%; object-fit:cover; background:#000; }
+  .scan-frame{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:82%; max-width:380px; height:130px; border:3px solid var(--green-500); border-radius:14px; box-shadow:0 0 0 2000px rgba(0,0,0,.4); pointer-events:none; }
+  .scan-hint{ position:absolute; bottom:290px; left:0; right:0; text-align:center; color:#fff; font-size:.92rem; }
+  .trigger-btn{
+    position:absolute; bottom:150px; left:50%; transform:translateX(-50%);
+    width:120px; height:120px; border-radius:999px; border:4px solid #fff;
+    background:rgba(255,255,255,.15); color:#fff; font-size:.8rem; font-weight:700;
+    padding:12px; cursor:pointer; touch-action:none; user-select:none; -webkit-user-select:none;
+  }
+  .trigger-btn.activo{ background:var(--green-600); border-color:var(--green-500); }
+  .scan-feed{ position:absolute; bottom:20px; left:16px; right:16px; display:flex; flex-direction:column; gap:6px; max-height:40vh; overflow-y:auto; }
+  .scan-feed-item{ background:rgba(255,255,255,.94); color:var(--ink); padding:9px 13px; border-radius:8px; font-size:.86rem; font-weight:600; display:flex; justify-content:space-between; gap:8px; }
+  .scan-feed-item.enviado{ color:var(--green-700); }
+  .scan-feed-item small{ font-weight:400; color:var(--ink-soft); }
+  .block-overlay{ position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; padding:24px; z-index:50; }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+
+<script>
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', () => { navigator.serviceWorker.register('./sw-escaner.js').catch(()=>{}); });
+  }
+  const SUPABASE_URL = 'https://waahxnhexfvpaypwsvqg.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_c9LODHYI87bNwTi2XaYKDw_dzvIKV2o';
+  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const BARCODE_FORMATS = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','codabar','itf'];
+
+  let negocio = null;     // { id, nombre_negocio, codigo }
+  let cajero = null;      // { id, nombre, codigo }
+  let turno = null;       // { id, cajero_apertura }
+  let scannerStream = null;
+  let scannerLoopId = null;
+  let scannerDetector = null;
+  let escaneandoPausado = false;
+  let disparadorActivo = false;
+  const PAUSA_DESPUES_DE_ESCANEAR = 1200; // ms de "descanso" tras cada lectura exitosa
+  let audioCtx = null;
+  function reproducirBeep(){
+    try{
+      if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = 1800;
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.12);
+    }catch(e){ /* audio no disponible: se ignora, no afecta el escaneo */ }
+  }
+  let feedItems = [];
+  let vigilanciaTurnoId = null;
+
+  function escapeHTML(str){
+    return String(str).replace(/[&<>"']/g, s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+  }
+  function barcodeSoportado(){ return 'BarcodeDetector' in window; }
+  function esNavegadorEnApp(){
+    const ua = navigator.userAgent || '';
+    return /\bWhatsApp\b|FBAN|FBAV|Instagram|Line\/|MicroMessenger|Twitter/i.test(ua);
+  }
+  function renderAbrirEnChrome(){
+    document.getElementById('app').innerHTML = `
+      <div class="wrap"><div class="card">
+        <h1>Abre esto en Chrome</h1>
+        <p class="sub">Estás viendo esta página dentro de otra app (como WhatsApp), y por seguridad no te va a dejar usar la cámara ahí.</p>
+        <p class="sub">Toca los tres puntos (⋮) arriba y elige "Abrir en Chrome" o "Abrir en el navegador". Si no aparece esa opción, mantén presionado el link donde te lo compartieron → "Copiar enlace" → pégalo directo en Chrome.</p>
+      </div></div>`;
+  }
+
+  // ------------------------------------------------------------- Pantalla 1
+  function renderVinculo(errorMsg){
+    document.getElementById('app').innerHTML = `
+      <div class="wrap">
+        <div class="card">
+          <h1>Escáner de caja</h1>
+          <p class="sub">Captura el código de tu negocio y tu código de cajero para empezar a escanear.</p>
+          <form id="vinculoForm" class="form-grid">
+            <label>Código de negocio<input required name="negocio" type="text" autocomplete="off" /></label>
+            <label>Código de cajero<input required name="cajero" type="password" inputmode="numeric" autocomplete="off" /></label>
+            <button type="submit" class="btn-primary">Entrar</button>
+          </form>
+          ${errorMsg ? `<p class="error-text">${escapeHTML(errorMsg)}</p>` : ''}
+        </div>
+      </div>`;
+    document.getElementById('vinculoForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      try{
+        if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if(audioCtx.state === 'suspended') audioCtx.resume();
+      }catch(err){ /* audio no disponible: se ignora */ }
+      const codigoNegocio = e.target.negocio.value.trim();
+      const codigoCajero = e.target.cajero.value.trim();
+      if(!codigoNegocio || !codigoCajero) return;
+      await intentarVincular(codigoNegocio, codigoCajero);
+    });
+  }
+
+  async function intentarVincular(codigoNegocio, codigoCajero){
+    try{
+      const { data: negocioData, error: negocioErr } = await supabaseClient
+        .from('negocios_estatus_publico')
+        .select('id, codigo, estatus, nombre_negocio')
+        .ilike('codigo', codigoNegocio)
+        .maybeSingle();
+      if(negocioErr){ renderVinculo('Error al buscar: ' + (negocioErr.message||'')); return; }
+      if(!negocioData){ renderVinculo('No se encontró ese código de negocio.'); return; }
+      if(negocioData.estatus === 'suspendido'){ renderVinculo('Este negocio tiene el servicio suspendido.'); return; }
+
+      const { data: cajeros, error: cajeroErr } = await supabaseClient
+        .from('cajeros').select('*').eq('negocio_id', negocioData.id).eq('activo', true);
+      if(cajeroErr){ renderVinculo('Error al buscar cajeros: ' + (cajeroErr.message||'')); return; }
+      const cajeroMatch = (cajeros||[]).find(c => c.codigo.trim().toLowerCase() === codigoCajero.toLowerCase());
+      if(!cajeroMatch){ renderVinculo('Código de cajero no reconocido para este negocio.'); return; }
+
+      const { data: turnosAbiertos, error: turnoErr } = await supabaseClient
+        .from('turnos').select('*').eq('negocio_id', negocioData.id).eq('estado','abierto')
+        .order('fecha_apertura', {ascending:false}).limit(1);
+      if(turnoErr){ renderVinculo('Error al buscar el turno: ' + (turnoErr.message||'')); return; }
+      const turnoData = (turnosAbiertos && turnosAbiertos.length) ? turnosAbiertos[0] : null;
+      if(!turnoData){ renderVinculo('No hay un turno abierto. Pide que lo abran en el punto de venta primero.'); return; }
+
+      negocio = negocioData;
+      cajero = cajeroMatch;
+      turno = turnoData;
+      guardarSesionEscaner();
+      iniciarEscaneo();
+    }catch(e){
+      renderVinculo('No se pudo conectar. Revisa tu internet e intenta de nuevo.');
+    }
+  }
+
+  // -------------------------------------------------- Persistencia de sesión
+  // Se guarda hasta que el turno se cierre (no cada vez que se cierra el link),
+  // pensado para cuando esto se empaquete como aplicación.
+  function guardarSesionEscaner(){
+    try{
+      localStorage.setItem('escanerSesion', JSON.stringify({ negocio, cajero, turno }));
+    }catch(e){ /* almacenamiento no disponible: se ignora */ }
+  }
+  function cargarSesionEscaner(){
+    try{
+      const raw = localStorage.getItem('escanerSesion');
+      return raw ? JSON.parse(raw) : null;
+    }catch(e){ return null; }
+  }
+  function borrarSesionEscaner(){
+    try{ localStorage.removeItem('escanerSesion'); }catch(e){ /* se ignora */ }
+  }
+  async function reanudarSesionGuardada(){
+    const sesion = cargarSesionEscaner();
+    if(!sesion || !sesion.negocio || !sesion.cajero || !sesion.turno) return false;
+    try{
+      const { data } = await supabaseClient.from('turnos').select('*').eq('id', sesion.turno.id).maybeSingle();
+      if(data && data.estado === 'abierto'){
+        negocio = sesion.negocio;
+        cajero = sesion.cajero;
+        turno = data;
+        iniciarEscaneo();
+        return true;
+      }
+    }catch(e){ /* sin conexión: se intentará más tarde con el flujo normal */ }
+    borrarSesionEscaner();
+    return false;
+  }
+
+  // ------------------------------------------------------------- Pantalla 2
+  function iniciarEscaneo(){
+    feedItems = [];
+    escaneandoPausado = false;
+    disparadorActivo = false;
+    document.getElementById('app').innerHTML = `
+      <div class="scan-screen">
+        <div class="scan-topbar">
+          <span class="who">${escapeHTML(negocio.nombre_negocio)} · ${escapeHTML(cajero.nombre)}</span>
+          <button type="button" class="scan-exit" id="salirBtn">Salir</button>
+        </div>
+        <video id="scanVideo" class="scan-video" autoplay playsinline muted></video>
+        <div class="scan-frame"></div>
+        <p class="scan-hint">Apunta la cámara, luego mantén presionado el botón</p>
+        <button type="button" id="triggerBtn" class="trigger-btn">Mantén presionado para leer</button>
+        <div id="scanFeed" class="scan-feed"></div>
+      </div>`;
+    document.getElementById('salirBtn').addEventListener('click', salir);
+    const triggerBtn = document.getElementById('triggerBtn');
+    const activarDisparador = (e)=>{
+      e.preventDefault();
+      try{
+        if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if(audioCtx.state === 'suspended') audioCtx.resume();
+      }catch(err){ /* audio no disponible: se ignora */ }
+      disparadorActivo = true; triggerBtn.classList.add('activo'); scannerLoop();
+    };
+    const desactivarDisparador = ()=>{ disparadorActivo = false; triggerBtn.classList.remove('activo'); };
+    triggerBtn.addEventListener('pointerdown', activarDisparador);
+    triggerBtn.addEventListener('pointerup', desactivarDisparador);
+    triggerBtn.addEventListener('pointercancel', desactivarDisparador);
+    triggerBtn.addEventListener('pointerleave', desactivarDisparador);
+    try{
+      if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+    }catch(err){ /* audio no disponible: se ignora */ }
+
+    if(!barcodeSoportado()){
+      document.getElementById('app').innerHTML = `
+        <div class="block-overlay"><div class="card">
+          <h1>No compatible</h1>
+          <p class="sub">Tu navegador no soporta lectura de códigos de barra. Usa Chrome en un teléfono Android.</p>
+          <button type="button" class="btn-primary" id="volverBtn">Volver</button>
+        </div></div>`;
+      document.getElementById('volverBtn').addEventListener('click', ()=>renderVinculo());
+      return;
+    }
+
+    navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } })
+      .then(stream=>{
+        scannerStream = stream;
+        const video = document.getElementById('scanVideo');
+        if(!video){ stream.getTracks().forEach(t=>t.stop()); return; }
+        video.srcObject = stream;
+        scannerDetector = new window.BarcodeDetector({ formats: BARCODE_FORMATS });
+      })
+      .catch((err)=>{
+        const detalle = err ? ((err.name||'Error') + (err.message ? ': '+err.message : '')) : 'Error desconocido';
+        document.getElementById('app').innerHTML = `
+          <div class="block-overlay"><div class="card">
+            <h1>No se pudo abrir la cámara</h1>
+            <p class="sub">${escapeHTML(detalle)}</p>
+            <button type="button" class="btn-primary" id="volverBtnCam">Volver</button>
+          </div></div>`;
+        document.getElementById('volverBtnCam').addEventListener('click', ()=>renderVinculo());
+      });
+
+    if(vigilanciaTurnoId) clearInterval(vigilanciaTurnoId);
+    vigilanciaTurnoId = setInterval(verificarTurnoSigueAbierto, 20000);
+  }
+
+  async function scannerLoop(){
+    if(!disparadorActivo) return;
+    const video = document.getElementById('scanVideo');
+    if(!video || !scannerDetector) return;
+    if(!escaneandoPausado){
+      try{
+        const codigos = await scannerDetector.detect(video);
+        if(codigos && codigos.length){
+          const valor = codigos[0].rawValue;
+          if(valor){
+            reproducirBeep();
+            enviarEscaneo(valor);
+            escaneandoPausado = true;
+            setTimeout(()=>{ escaneandoPausado = false; }, PAUSA_DESPUES_DE_ESCANEAR);
+          }
+        }
+      }catch(e){ /* frame no listo: seguir intentando */ }
+    }
+    if(scannerStream && disparadorActivo){ scannerLoopId = requestAnimationFrame(scannerLoop); }
+  }
+
+  async function enviarEscaneo(codigo){
+    const itemId = agregarAlFeed(codigo, null);
+    try{
+      const { error } = await supabaseClient.from('escaneos_pendientes').insert({
+        negocio_id: negocio.id, turno_id: turno.id, codigo_barra: codigo, cajero: cajero.nombre
+      });
+      actualizarFeed(itemId, !error, error ? (error.message || error.code || 'Error desconocido') : null);
+    }catch(e){
+      actualizarFeed(itemId, false, 'Sin conexión');
+    }
+  }
+
+  function agregarAlFeed(codigo, enviado){
+    const itemId = Date.now() + '_' + Math.random();
+    feedItems.unshift({ id:itemId, codigo, hora: new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit',second:'2-digit'}), enviado, detalle:null });
+    feedItems = feedItems.slice(0, 8);
+    pintarFeed();
+    setTimeout(()=>{
+      feedItems = feedItems.filter(f => f.id !== itemId);
+      pintarFeed();
+    }, 3000);
+    return itemId;
+  }
+  function actualizarFeed(itemId, ok, detalle){
+    const item = feedItems.find(f => f.id === itemId);
+    if(item){ item.enviado = ok; item.detalle = detalle || null; }
+    pintarFeed();
+  }
+  function pintarFeed(){
+    const el = document.getElementById('scanFeed');
+    if(!el) return;
+    el.innerHTML = feedItems.map(f=>{
+      let estado = f.enviado === null ? 'Enviando…' : (f.enviado ? 'Enviado' : ('Error: ' + escapeHTML(f.detalle || 'desconocido')));
+      return `<div class="scan-feed-item ${f.enviado?'enviado':''}"><span>${escapeHTML(f.codigo)}</span><small>${estado} · ${f.hora}</small></div>`;
+    }).join('');
+  }
+
+  async function verificarTurnoSigueAbierto(){
+    if(!turno) return;
+    try{
+      const { data } = await supabaseClient.from('turnos').select('estado').eq('id', turno.id).maybeSingle();
+      if(!data || data.estado !== 'abierto'){
+        detenerCamara();
+        borrarSesionEscaner();
+        document.getElementById('app').innerHTML = `
+          <div class="block-overlay"><div class="card">
+            <h1>Turno cerrado</h1>
+            <p class="sub">Este turno ya se cerró. Pide que abran uno nuevo en el punto de venta para seguir escaneando.</p>
+            <button type="button" class="btn-primary" id="volverBtn2">Volver</button>
+          </div></div>`;
+        document.getElementById('volverBtn2').addEventListener('click', ()=>renderVinculo());
+      }
+    }catch(e){ /* sin conexión: se reintenta en el siguiente ciclo */ }
+  }
+
+  function detenerCamara(){
+    if(scannerLoopId){ cancelAnimationFrame(scannerLoopId); scannerLoopId = null; }
+    if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
+    scannerDetector = null;
+    if(vigilanciaTurnoId){ clearInterval(vigilanciaTurnoId); vigilanciaTurnoId = null; }
+  }
+
+  function salir(){
+    detenerCamara();
+    borrarSesionEscaner();
+    negocio = null; cajero = null; turno = null;
+    renderVinculo();
+  }
+
+  (async function boot(){
+    if(esNavegadorEnApp()){ renderAbrirEnChrome(); return; }
+    const reanudo = await reanudarSesionGuardada();
+    if(!reanudo){ renderVinculo(); }
+  })();
+</script>
+</body>
+</html>
