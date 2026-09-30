@@ -90,6 +90,7 @@
   let cajero = null;      // { id, nombre, codigo }
   let turno = null;       // { id, cajero_apertura }
   let scannerStream = null;
+  let pantallaEscaneoActiva = false;
   let scannerLoopId = null;
   let scannerDetector = null;
   let escaneandoPausado = false;
@@ -275,6 +276,14 @@
       return;
     }
 
+    pantallaEscaneoActiva = true;
+    abrirCamara();
+
+    if(vigilanciaTurnoId) clearInterval(vigilanciaTurnoId);
+    vigilanciaTurnoId = setInterval(verificarTurnoSigueAbierto, 20000);
+  }
+
+  function abrirCamara(){
     navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } })
       .then(stream=>{
         scannerStream = stream;
@@ -293,10 +302,20 @@
           </div></div>`;
         document.getElementById('volverBtnCam').addEventListener('click', ()=>renderVinculo());
       });
-
-    if(vigilanciaTurnoId) clearInterval(vigilanciaTurnoId);
-    vigilanciaTurnoId = setInterval(verificarTurnoSigueAbierto, 20000);
   }
+
+  // Cuando el celular manda la app a segundo plano, el sistema le quita el
+  // acceso a la cámara; al regresar, hay que volver a pedirla — si no, se ve
+  // congelada con el último cuadro de antes.
+  document.addEventListener('visibilitychange', ()=>{
+    if(!pantallaEscaneoActiva) return;
+    if(document.visibilityState === 'hidden'){
+      if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
+      scannerDetector = null;
+    }else if(document.visibilityState === 'visible'){
+      if(!scannerStream && document.getElementById('scanVideo')){ abrirCamara(); }
+    }
+  });
 
   async function scannerLoop(){
     if(!disparadorActivo) return;
@@ -375,6 +394,7 @@
   }
 
   function detenerCamara(){
+    pantallaEscaneoActiva = false;
     if(scannerLoopId){ cancelAnimationFrame(scannerLoopId); scannerLoopId = null; }
     if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
     scannerDetector = null;
