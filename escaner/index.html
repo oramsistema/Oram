@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Escáner · Punto de Venta</title>
-<link rel="manifest" href="manifest-escaner.json">
+<link rel="manifest" href="/Oram/escaner/manifest-escaner.json">
 <meta name="theme-color" content="#16A34A">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -78,7 +78,9 @@
 
 <script>
   if('serviceWorker' in navigator){
-    window.addEventListener('load', () => { navigator.serviceWorker.register('./sw-escaner.js').catch(()=>{}); });
+    window.addEventListener('load', () => { 
+      navigator.serviceWorker.register('/Oram/escaner/sw-escaner.js', { scope: '/Oram/escaner/' }).catch(()=>{}); 
+    });
   }
   const SUPABASE_URL = 'https://waahxnhexfvpaypwsvqg.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_c9LODHYI87bNwTi2XaYKDw_dzvIKV2o';
@@ -143,7 +145,7 @@
             <label>Código de cajero<input required name="cajero" type="password" inputmode="numeric" autocomplete="off" /></label>
             <button type="submit" class="btn-primary">Entrar</button>
           </form>
-          ${errorMsg ? `<p class="error-text">${escapeHTML(errorMsg)}</p>` : ''}
+          ${errorMsg ? <p class="error-text">${escapeHTML(errorMsg)}</p> : ''}
         </div>
       </div>`;
     document.getElementById('vinculoForm').addEventListener('submit', async (e)=>{
@@ -352,7 +354,7 @@
     if(!el) return;
     el.innerHTML = feedItems.map(f=>{
       let estado = f.enviado === null ? 'Enviando…' : (f.enviado ? 'Enviado' : ('Error: ' + escapeHTML(f.detalle || 'desconocido')));
-      return `<div class="scan-feed-item ${f.enviado?'enviado':''}"><span>${escapeHTML(f.codigo)}</span><small>${estado} · ${f.hora}</small></div>`;
+      return <div class="scan-feed-item ${f.enviado?'enviado':''}"><span>${escapeHTML(f.codigo)}</span><small>${estado} · ${f.hora}</small></div>;
     }).join('');
   }
 
