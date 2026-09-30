@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Recepción de mercancía</title>
-<link rel="manifest" href="/Oram/recepcion/manifest-recepcion.json">
+<link rel="manifest" href="manifest-recepcion.json">
 <meta name="theme-color" content="#16A34A">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -101,9 +101,7 @@
 
 <script>
   if('serviceWorker' in navigator){
-    window.addEventListener('load', () => { 
-      navigator.serviceWorker.register('/Oram/recepcion/sw-recepcion.js', { scope: '/Oram/recepcion/' }).catch(()=>{}); 
-    });
+    window.addEventListener('load', () => { navigator.serviceWorker.register('./sw-recepcion.js').catch(()=>{}); });
   }
   const BARCODE_FORMATS = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','codabar','itf'];
 
