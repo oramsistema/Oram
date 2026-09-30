@@ -1,0 +1,16 @@
+{
+  "name": "Oram Administración",
+  "short_name": "Oram Admin",
+  "description": "Panel de administración de clientes — Oram.",
+  "start_url": "./admin.html",
+  "scope": "./admin.html",
+  "id": "./admin.html",
+  "display": "standalone",
+  "background_color": "#F3FBF6",
+  "theme_color": "#16A34A",
+  "orientation": "any",
+  "icons": [
+    { "src": "icon-admin-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-admin-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
