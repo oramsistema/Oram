@@ -1,32 +1,44 @@
 const CACHE_NAME = 'oram-recepcion-v1';
-const URLS_TO_CACHE = ['./', './index.html'];
+const URLS_TO_CACHE = ['/Oram/recepcion/', '/Oram/recepcion/index.html'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(URLS_TO_CACHE)).catch(()=>{})
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(URLS_TO_CACHE)).catch(() => {})
   );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
+    caches.keys().then((keys) =>
+      Promise.all(
+        // Solo borra versiones viejas de recepcion, sin tocar escaner ni pos
+        keys.filter((k) => k.startsWith('oram-recepcion-') && k !== CACHE_NAME).map((k) => caches.delete(k))
+      )
+    )
   );
   self.clients.claim();
 });
 
+// Solo intercepta peticiones dentro de /Oram/recepcion/
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  if(url.origin === self.location.origin && event.request.method === 'GET'){
+  if (
+    url.origin === self.location.origin &&
+    url.pathname.startsWith('/Oram/recepcion/') &&
+    event.request.method === 'GET'
+  ) {
     event.respondWith(
       caches.match(event.request).then((cached) => {
-        const fetchPromise = fetch(event.request).then((networkResponse) => {
-          if(networkResponse && networkResponse.ok){
-            const clone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return networkResponse;
-        }).catch(() => cached);
+        const fetchPromise = fetch(event.request)
+          .then((networkResponse) => {
+            if (networkResponse && networkResponse.ok) {
+              const clone = networkResponse.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+            }
+            return networkResponse;
+          })
+          .catch(() => cached);
         return cached || fetchPromise;
       })
     );
