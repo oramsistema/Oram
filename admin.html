@@ -448,11 +448,12 @@
     activeNegocioId = negocioId;
     const negocio = negocios.find(n=>n.id===negocioId);
     if(!negocio) return;
-    const [{ data: pagos }, { data: snap }, { data: cajerosCliente }, { data: licenciasCliente }] = await Promise.all([
+    const [{ data: pagos }, { data: snap }, { data: cajerosCliente }, { data: licenciasCliente }, { data: turnosCliente }] = await Promise.all([
       supabaseClient.from('pagos').select('*').eq('negocio_id', negocioId).order('fecha', {ascending:false}),
       supabaseClient.from('inventario_snapshot').select('*').eq('negocio_id', negocioId).maybeSingle(),
       supabaseClient.from('cajeros').select('*').eq('negocio_id', negocioId).eq('activo', true).order('nombre'),
-      supabaseClient.from('licencias').select('*').eq('negocio_id', negocioId).order('created_at', {ascending:false})
+      supabaseClient.from('licencias').select('*').eq('negocio_id', negocioId).order('created_at', {ascending:false}),
+      supabaseClient.from('turnos').select('*').eq('negocio_id', negocioId).eq('estado','cerrado').order('fecha_cierre', {ascending:false})
     ]);
     const dias = diasRestantes(negocio.fecha_proximo_pago);
     clienteSubTab = 'pagos';
@@ -473,6 +474,7 @@
         <button type="button" class="sub-tab-btn active" data-subtab="pagos">Pagos</button>
         <button type="button" class="sub-tab-btn" data-subtab="inventario">Inventario</button>
         <button type="button" class="sub-tab-btn" data-subtab="usuarios">Usuarios</button>
+        <button type="button" class="sub-tab-btn" data-subtab="cortes">Cortes</button>
         <button type="button" class="sub-tab-btn" data-subtab="config">Marca y ticket</button>
         <button type="button" class="sub-tab-btn" data-subtab="reporte">Reporte</button>
       </div>
@@ -497,17 +499,18 @@
 
     let cajerosState = cajerosCliente || [];
     let licenciasState = licenciasCliente || [];
+    let turnosState = turnosCliente || [];
     document.querySelectorAll('[data-subtab]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         clienteSubTab = btn.dataset.subtab;
         document.querySelectorAll('[data-subtab]').forEach(b=> b.classList.toggle('active', b.dataset.subtab===clienteSubTab));
-        renderClienteSubContent(negocio, pagos, snap, cajerosState, licenciasState);
+        renderClienteSubContent(negocio, pagos, snap, cajerosState, licenciasState, turnosState);
       });
     });
-    renderClienteSubContent(negocio, pagos, snap, cajerosState, licenciasState);
+    renderClienteSubContent(negocio, pagos, snap, cajerosState, licenciasState, turnosState);
   }
 
-  function renderClienteSubContent(negocio, pagos, snap, cajeros, licencias){
+  function renderClienteSubContent(negocio, pagos, snap, cajeros, licencias, turnos){
     const el = document.getElementById('clienteSubContent');
     if(!el) return;
 
@@ -723,7 +726,7 @@
         if(error){ showToast('No se pudo actualizar el PIN.', 'error'); return; }
         negocio.admin_pin = nuevoPin;
         showToast('PIN actualizado. Avísale al cliente su nuevo PIN.', 'success');
-        renderClienteSubContent(negocio, pagos, snap, cajeros, licencias);
+        renderClienteSubContent(negocio, pagos, snap, cajeros, licencias, turnos);
       });
       el.querySelectorAll('[data-ver-codigo]').forEach(btn=>{
         btn.addEventListener('click', ()=>{
@@ -735,7 +738,7 @@
         });
       });
       el.querySelectorAll('[data-editar-cajero]').forEach(btn=>{
-        btn.addEventListener('click', ()=> abrirEditarCajeroModal(negocio, pagos, snap, cajeros, licencias, btn.dataset.editarCajero));
+        btn.addEventListener('click', ()=> abrirEditarCajeroModal(negocio, pagos, snap, cajeros, licencias, turnos, btn.dataset.editarCajero));
       });
       el.querySelectorAll('[data-eliminar-cajero]').forEach(btn=>{
         btn.addEventListener('click', async ()=>{
@@ -745,7 +748,7 @@
           const idx = cajeros.findIndex(c=>c.id===btn.dataset.eliminarCajero);
           if(idx>-1) cajeros.splice(idx,1);
           showToast('Cajero eliminado.', 'success');
-          renderClienteSubContent(negocio, pagos, snap, cajeros, licencias);
+          renderClienteSubContent(negocio, pagos, snap, cajeros, licencias, turnos);
         });
       });
       el.querySelectorAll('[data-toggle-licencia]').forEach(btn=>{
@@ -756,7 +759,7 @@
           const lic = licencias.find(l=>l.id===btn.dataset.toggleLicencia);
           if(lic) lic.activa = !activaActual;
           showToast(activaActual ? 'Licencia desactivada.' : 'Licencia reactivada.', 'success');
-          renderClienteSubContent(negocio, pagos, snap, cajeros, licencias);
+          renderClienteSubContent(negocio, pagos, snap, cajeros, licencias, turnos);
         });
       });
       document.getElementById('generarLicenciaBtn').addEventListener('click', async ()=>{
@@ -765,8 +768,76 @@
         if(error){ showToast('No se pudo generar la licencia.', 'error'); return; }
         licencias.unshift(data);
         showToast('Nueva licencia generada.', 'success');
-        renderClienteSubContent(negocio, pagos, snap, cajeros, licencias);
+        renderClienteSubContent(negocio, pagos, snap, cajeros, licencias, turnos);
       });
+
+    }else if(clienteSubTab==='cortes'){
+      el.innerHTML = `
+        <div class="detail-section">
+          <div class="form-grid" style="flex-direction:row; gap:10px; align-items:flex-end; margin-bottom:14px;">
+            <label style="flex:1;">Desde<input id="cortesDesde" type="date" /></label>
+            <label style="flex:1;">Hasta<input id="cortesHasta" type="date" /></label>
+          </div>
+          <div id="cortesTablaWrap"></div>
+        </div>`;
+      const desdeInput = document.getElementById('cortesDesde');
+      const hastaInput = document.getElementById('cortesHasta');
+      const renderTablaCortes = ()=>{
+        const desde = desdeInput.value;
+        const hasta = hastaInput.value;
+        const filtrados = (turnos||[]).filter(t=>{
+          const fecha = (t.fecha_cierre||'').slice(0,10);
+          return (!desde || fecha>=desde) && (!hasta || fecha<=hasta);
+        });
+        document.getElementById('cortesTablaWrap').innerHTML = `
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead><tr><th>Cierre</th><th>Cajero apertura</th><th>Cajero cierre</th><th class="num">Diferencia</th><th></th></tr></thead>
+              <tbody>${filtrados.length ? filtrados.map(t=>{
+                const dif = Number(t.diferencia)||0;
+                const cuadra = Math.abs(dif) < 0.01;
+                const color = cuadra ? 'var(--green-600)' : (dif<0 ? 'var(--red)' : 'var(--amber)');
+                const etiqueta = cuadra ? 'Cuadra' : (dif<0 ? 'Faltante '+formatMoney(Math.abs(dif)) : 'Excedente '+formatMoney(dif));
+                return `<tr>
+                  <td>${t.fecha_cierre ? new Date(t.fecha_cierre).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'}) : '—'}</td>
+                  <td>${escapeHTML(t.cajero_apertura||'—')}</td>
+                  <td>${escapeHTML(t.cajero_cierre||'—')}</td>
+                  <td class="num" style="color:${color}; font-weight:600;">${escapeHTML(etiqueta)}</td>
+                  <td><button type="button" class="btn-secondary btn-sm" data-ver-corte="${t.id}">Ver detalle</button></td>
+                </tr>`;
+              }).join('') : '<tr><td colspan="5"><div class="empty-state">Sin cortes en este rango.</div></td></tr>'}</tbody>
+            </table>
+          </div>
+        `;
+        el.querySelectorAll('[data-ver-corte]').forEach(btn=>{
+          btn.addEventListener('click', ()=>{
+            const t = turnos.find(x=>x.id===btn.dataset.verCorte);
+            if(!t) return;
+            const fila = (label, esperado, contado)=> `
+              <div class="detail-grid" style="grid-template-columns:1fr 1fr 1fr; margin-bottom:6px;">
+                <div><span>${label}</span></div>
+                <div><span>Esperado</span>${formatMoney(esperado)}</div>
+                <div><span>Contado</span>${formatMoney(contado)}</div>
+              </div>`;
+            openModal('Detalle del corte', `
+              <div class="detail-section">
+                <div class="detail-grid" style="margin-bottom:14px;">
+                  <div><span>Apertura</span>${t.fecha_apertura ? new Date(t.fecha_apertura).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'}) : '—'} · ${escapeHTML(t.cajero_apertura||'—')}</div>
+                  <div><span>Cierre</span>${t.fecha_cierre ? new Date(t.fecha_cierre).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'}) : '—'} · ${escapeHTML(t.cajero_cierre||'—')}</div>
+                  <div><span>Fondo inicial</span>${formatMoney(t.fondo_inicial)}</div>
+                </div>
+                ${fila('Efectivo', t.efectivo_esperado, t.efectivo_contado)}
+                ${fila('Transferencia', t.transferencia_esperado, t.transferencia_contado)}
+                ${fila('Terminal bancaria', t.terminal_esperado, t.terminal_contado)}
+              </div>
+            `, `<button type="button" class="btn-primary" id="closeCorteDetail">Cerrar</button>`);
+            document.getElementById('closeCorteDetail').addEventListener('click', closeModal);
+          });
+        });
+      };
+      desdeInput.addEventListener('change', renderTablaCortes);
+      hastaInput.addEventListener('change', renderTablaCortes);
+      renderTablaCortes();
 
     }else if(clienteSubTab==='reporte'){
       el.innerHTML = `
@@ -831,7 +902,7 @@
       </div>`;
   }
 
-  function abrirEditarCajeroModal(negocio, pagos, snap, cajeros, licencias, cajeroId){
+  function abrirEditarCajeroModal(negocio, pagos, snap, cajeros, licencias, turnos, cajeroId){
     const c = cajeros.find(x=>x.id===cajeroId);
     if(!c) return;
     openModal('Editar cajero', `
@@ -862,7 +933,7 @@
       Object.assign(c, { nombre, codigo, rol });
       closeModal();
       showToast('Cajero actualizado.', 'success');
-      renderClienteSubContent(negocio, pagos, snap, cajeros, licencias);
+      renderClienteSubContent(negocio, pagos, snap, cajeros, licencias, turnos);
     });
   }
 
