@@ -178,6 +178,10 @@
 
   // ------------------------------------------------------------- Pantalla 2
   function iniciarEscaneo(){
+    // Si ya había una cámara abierta de antes (por ejemplo, al volver a armar
+    // esta pantalla después de guardar un producto), suéltala primero — si no,
+    // se van acumulando conexiones a la cámara sin cerrar.
+    if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
     escaneandoPausado = false;
     disparadorActivo = false;
     document.getElementById('app').innerHTML = `
@@ -197,12 +201,13 @@
     document.getElementById('salirBtn').addEventListener('click', ()=>{ detenerCamara(); renderInicio(); });
     document.getElementById('verListaBtn').addEventListener('click', ()=>{ detenerCamara(); renderLista(); });
     const triggerBtn = document.getElementById('triggerBtn');
-    const activarDisparador = (e)=>{
+    const activarDisparador = async (e)=>{
       e.preventDefault();
       try{
         if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         if(audioCtx.state === 'suspended') audioCtx.resume();
       }catch(err){ /* se ignora */ }
+      await asegurarCamaraViva();
       disparadorActivo = true; triggerBtn.classList.add('activo'); scannerLoop();
     };
     const desactivarDisparador = ()=>{ disparadorActivo = false; triggerBtn.classList.remove('activo'); };
@@ -224,6 +229,19 @@
 
     pantallaEscaneoActiva = true;
     abrirCamara();
+  }
+
+  async function asegurarCamaraViva(){
+    const track = scannerStream ? scannerStream.getVideoTracks()[0] : null;
+    if(track && track.readyState === 'live'){ return; }
+    if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+      scannerStream = stream;
+      const video = document.getElementById('scanVideo');
+      if(video){ video.srcObject = stream; }
+      if(!scannerDetector){ scannerDetector = new window.BarcodeDetector({ formats: BARCODE_FORMATS }); }
+    }catch(err){ /* si falla, se reintentará en el siguiente intento de escaneo */ }
   }
 
   function abrirCamara(){
@@ -424,7 +442,7 @@
     const ws = XLSX.utils.aoa_to_sheet(datos);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Recepción');
-    const nombreArchivo = 'recepcion_' + (etiquetaLote ? etiquetaLote.replace(/[^a-z0-9]+/gi,'_') + '_' : '') + new Date().toISOString().slice(0,10) + '.xlsx';
+    const nombreArchivo = 'recepcion_' + (etiquetaLote ? etiquetaLote.replace(/[^a-z0-9]+/gi,'_') + '_' : '') + new Date().toLocaleDateString('en-CA') + '.xlsx';
     XLSX.writeFile(wb, nombreArchivo);
     showToast('Excel descargado.', 'success');
   }
