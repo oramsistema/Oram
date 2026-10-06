@@ -77,7 +77,9 @@
   .summary-value{ font-family:'Space Grotesk',sans-serif; font-size:1.6rem; font-weight:700; }
 
   .panel-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:12px; }
-  .table-scroll{ overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface); }
+  /* Tabla de tamaño máximo fijo: aunque crezca el contenido, no se alarga; se desplaza por dentro con el encabezado fijo */
+  .table-scroll{ overflow:auto; max-height:min(400px, 60vh); border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface); scrollbar-width:thin; }
+  .table-scroll .data-table thead th{ position:sticky; top:0; z-index:2; box-shadow:inset 0 -1px 0 var(--line); }
   .data-table{ width:100%; border-collapse:collapse; min-width:680px; }
   .data-table th{ text-align:left; font-size:.74rem; color:var(--ink-soft); font-weight:600; padding:12px 16px; border-bottom:1px solid var(--line); background:var(--surface-alt); }
   .data-table td{ padding:12px 16px; border-bottom:1px solid var(--line); font-size:.89rem; }
@@ -98,6 +100,20 @@
   .modal-header h3{ font-size:1.1rem; }
   .modal-close{ background:none; border:none; font-size:1.3rem; cursor:pointer; color:var(--ink-soft); }
   .modal-body{ padding:20px 22px; }
+  /* Ficha del cliente a pantalla completa */
+  .modal-overlay.modal-overlay-full{ padding:0; align-items:stretch; background:var(--bg); overflow:hidden; }
+  .modal.modal-full{ max-width:none; width:100%; height:100%; max-height:none; border-radius:0; box-shadow:none; margin:0; display:flex; flex-direction:column; overflow:hidden; }
+  .modal-full .modal-header{ padding:14px clamp(16px,4vw,48px); background:var(--surface); }
+  .modal-full .modal-body{ flex:1; overflow-y:auto; padding:20px clamp(16px,4vw,48px); }
+  .modal-full .modal-footer{ padding:14px clamp(16px,4vw,48px); background:var(--surface); flex-wrap:wrap; }
+  .modal-full .table-scroll{ max-height:min(560px, 62vh); }
+  /* Novedades */
+  .modal.modal-novedades{ max-width:600px; }
+  .novedades-grupo{ margin:16px 0 4px; font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; color:var(--green-700); }
+  .novedad{ padding:12px 14px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-alt); margin:8px 0; }
+  .novedad p{ margin:4px 0 6px; font-size:.85rem; color:var(--ink-soft); }
+  .novedad ol{ margin:6px 0 0 18px; padding:0; font-size:.85rem; }
+  .novedad li{ margin:2px 0; }
   .modal-footer{ display:flex; justify-content:flex-end; gap:10px; padding:16px 22px; border-top:1px solid var(--line); }
 
   .detail-section{ margin-bottom:22px; }
@@ -166,6 +182,11 @@
   let activeNegocioId = null;
   let filtroClientes = 'todos';
 
+  // Un servicio ilimitado (recargas) no es mercancía física: no cuenta en inventario ni en su valor.
+  // Se reconoce por su marca o, por si faltara, por la cantidad simbólica de 999,999,999 piezas.
+  function esIlimitado(p){
+    return !!p.ilimitado || Number(p.stock) >= 999999999;
+  }
   function escapeHTML(str){
     return String(str).replace(/[&<>"']/g, s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
   }
@@ -260,7 +281,10 @@
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v17l-2.5-1.5L13 20l-2.5-1.5L8 20l-2-1.5V3z"/><line x1="8.5" y1="7.5" x2="15.5" y2="7.5"/><line x1="8.5" y1="11" x2="15.5" y2="11"/></svg>
           <span>Panel de Clientes</span>
         </div>
-        <button type="button" class="btn-ghost btn-sm" id="logoutBtn">Cerrar sesión</button>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button type="button" class="btn-ghost btn-sm" id="novedadesBtn">Novedades</button>
+          <button type="button" class="btn-ghost btn-sm" id="logoutBtn">Cerrar sesión</button>
+        </div>
       </header>
       <main class="content">
         <div class="summary-row">
@@ -301,6 +325,7 @@
       renderLogin();
     });
     document.getElementById('newClientBtn').addEventListener('click', openNewClientModal);
+    document.getElementById('novedadesBtn').addEventListener('click', ()=> abrirNovedadesAdmin(true));
     document.querySelectorAll('[data-filter]').forEach(btn=>{
       btn.addEventListener('click', ()=>{
         const f = btn.dataset.filter;
@@ -311,6 +336,7 @@
     const verTodosBtn = document.getElementById('verTodosBtn');
     if(verTodosBtn) verTodosBtn.addEventListener('click', ()=>{ filtroClientes='todos'; renderApp(); });
     renderClientsTable();
+    programarNovedadesAdmin();
   }
 
   function renderClientsTable(){
@@ -354,11 +380,14 @@
   }
 
   // ------------------------------------------------------------- Modales
-  function openModal(titleHTML, bodyHTML, footerHTML){
+  function openModal(titleHTML, bodyHTML, footerHTML, opciones){
+    const completa = !!(opciones && opciones.pantallaCompleta);
     document.getElementById('modalRoot').innerHTML = `
-      <div class="modal-overlay" id="modalOverlay">
-        <div class="modal" role="dialog" aria-modal="true">
-          <div class="modal-header"><h3>${titleHTML}</h3><button type="button" class="modal-close" id="modalCloseBtn">×</button></div>
+      <div class="modal-overlay ${completa?'modal-overlay-full':''}" id="modalOverlay">
+        <div class="modal ${completa?'modal-full':''}" role="dialog" aria-modal="true">
+          <div class="modal-header"><h3>${titleHTML}</h3>${completa
+            ? '<button type="button" class="btn-secondary btn-sm" id="modalCloseBtn">← Volver a clientes</button>'
+            : '<button type="button" class="modal-close" id="modalCloseBtn">×</button>'}</div>
           <div class="modal-body">${bodyHTML}</div>
           <div class="modal-footer">${footerHTML}</div>
         </div>
@@ -366,7 +395,80 @@
     document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
     document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
   }
-  function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
+  function closeModal(){
+    document.getElementById('modalRoot').innerHTML='';
+    const sub = document.getElementById('subModalRoot'); if(sub) sub.innerHTML='';
+  }
+  // Ventana pequeña que se abre ENCIMA de la ficha a pantalla completa, sin cerrarla
+  function abrirDetalleEncima(titleHTML, bodyHTML){
+    let root = document.getElementById('subModalRoot');
+    if(!root){ root = document.createElement('div'); root.id = 'subModalRoot'; document.body.appendChild(root); }
+    root.innerHTML = `
+      <div class="modal-overlay" id="subModalOverlay" style="z-index:120;">
+        <div class="modal" role="dialog" aria-modal="true">
+          <div class="modal-header"><h3>${titleHTML}</h3><button type="button" class="modal-close" id="subModalCloseBtn">×</button></div>
+          <div class="modal-body">${bodyHTML}</div>
+          <div class="modal-footer"><button type="button" class="btn-primary" id="subModalOkBtn">Cerrar</button></div>
+        </div>
+      </div>`;
+    const cerrar = ()=>{ root.innerHTML = ''; };
+    document.getElementById('subModalCloseBtn').addEventListener('click', cerrar);
+    document.getElementById('subModalOkBtn').addEventListener('click', cerrar);
+    document.getElementById('subModalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='subModalOverlay') cerrar(); });
+  }
+
+  // ---------- Novedades de la actualización ----------
+  const VERSION_ADMIN = '2026.10.06';
+  const NOVEDADES_ADMIN_KEY = 'oramNovedadesVistas_admin';
+  const NOVEDADES_ADMIN = [
+    { version:'2026.10.06', items:[
+      { titulo:'Ficha del cliente a pantalla completa',
+        detalle:'Al abrir un cliente ahora ocupa toda la pantalla.',
+        pasos:['En la lista de clientes, toca "Ver".','Revisa sus pestañas (pagos, inventario, cajeros, reporte…).','Toca "← Volver a clientes" para regresar a la lista.'] },
+      { titulo:'Cortes en la ficha del cliente',
+        detalle:'Cada cliente tiene su pestaña "Cortes" con todos sus cierres de turno.',
+        pasos:['Toca "Ver" en un cliente y abre la pestaña "Cortes".','Elige un rango de fechas (o déjalo vacío para ver todos).','Toca "Ver detalle" para ver lo esperado y lo contado de efectivo, transferencia y terminal.'] },
+      { titulo:'Tablas de tamaño fijo',
+        detalle:'Las listas ya no se alargan sin fin: se desplazan por dentro y el encabezado se queda fijo arriba.' },
+      { titulo:'Reporte e inventario sin recargas',
+        detalle:'Los servicios ilimitados ya no inflan el valor del inventario ni "Invertido en mercancía", y no salen en la lista para contar físicamente ni en el Excel.',
+        pasos:['Abre un cliente y entra a "Reporte".','Elige el rango de fechas y genera el reporte.'] },
+      { titulo:'Fechas del reporte en hora local',
+        detalle:'Las ventas de la tarde y la noche ya cuentan en el día correcto en el Reporte y en "Ventas por producto".' },
+      { titulo:'Novedades',
+        detalle:'Esta ventana aparece cuando hay una actualización. Para verla otra vez, toca "Novedades" arriba.' }
+    ]}
+  ];
+  let novedadesAdminProgramadas = false;
+  function novedadesAdminVistas(){ try{ return localStorage.getItem(NOVEDADES_ADMIN_KEY) || ''; }catch(e){ return ''; } }
+  function marcarNovedadesAdminVistas(){ try{ localStorage.setItem(NOVEDADES_ADMIN_KEY, VERSION_ADMIN); }catch(e){} }
+  function abrirNovedadesAdmin(manual){
+    const vista = novedadesAdminVistas();
+    let versiones = manual ? NOVEDADES_ADMIN.slice(0,1) : NOVEDADES_ADMIN.filter(n=> n.version > vista);
+    versiones = versiones.slice().sort((a,b)=> a.version < b.version ? 1 : -1);
+    if(!versiones.length) return;
+    const tarjeta = (it)=> `<div class="novedad"><strong>${escapeHTML(it.titulo)}</strong>`
+      + (it.detalle ? `<p>${escapeHTML(it.detalle)}</p>` : '')
+      + ((it.pasos && it.pasos.length) ? `<ol>${it.pasos.map(p=>`<li>${escapeHTML(p)}</li>`).join('')}</ol>` : '') + `</div>`;
+    const cuerpo = versiones.map(v=> (versiones.length>1 ? `<h4 class="novedades-grupo">Versión ${escapeHTML(v.version)}</h4>` : '') + v.items.map(tarjeta).join('')).join('');
+    openModal('Novedades de esta actualización',
+      `<p style="font-size:.88rem; color:var(--ink-soft); margin:0 0 6px;">Esto es lo nuevo en tu panel. Cada punto trae los pasos para usarlo.</p>${cuerpo}`,
+      manual
+        ? `<button type="button" class="btn-primary" id="novedadesOkBtn">Entendido</button>`
+        : `<button type="button" class="btn-ghost" id="novedadesLuegoBtn">Verlo después</button><button type="button" class="btn-primary" id="novedadesOkBtn">Entendido</button>`);
+    const m = document.querySelector('#modalRoot .modal');
+    if(m) m.classList.add('modal-novedades');
+    const ok = document.getElementById('novedadesOkBtn');
+    if(ok) ok.addEventListener('click', ()=>{ marcarNovedadesAdminVistas(); closeModal(); });
+    const luego = document.getElementById('novedadesLuegoBtn');
+    if(luego) luego.addEventListener('click', closeModal);
+  }
+  function programarNovedadesAdmin(){
+    if(novedadesAdminProgramadas) return;
+    novedadesAdminProgramadas = true;
+    if(!NOVEDADES_ADMIN.some(n=> n.version > novedadesAdminVistas())) return;
+    setTimeout(()=>{ if(document.getElementById('modalRoot').innerHTML.trim()==='') abrirNovedadesAdmin(false); }, 700);
+  }
 
   function sugerirCodigo(giro, nombre){
     const base = (giro||nombre||'NEG').toUpperCase().replace(/[^A-Z]/g,'').slice(0,4) || 'NEG';
@@ -486,7 +588,7 @@
         : `<button type="button" class="btn-primary" id="reactivateBtn">Reactivar servicio</button>`}
       ${negocio.estatus==='activo' && negocio.es_prueba && !negocio.prueba_extendida ? `<button type="button" class="btn-secondary" id="extendTrialBtn">Extender prueba (+15 días)</button>` : ''}
       <button type="button" class="btn-primary" id="registerPaymentBtn">Registrar pago</button>
-    `);
+    `, { pantallaCompleta:true });
 
     document.getElementById('closeDetail').addEventListener('click', closeModal);
     document.getElementById('registerPaymentBtn').addEventListener('click', ()=> openPaymentModal(negocio));
@@ -546,8 +648,8 @@
 
     }else if(clienteSubTab==='inventario'){
       const productos = (snap && snap.productos) || [];
-      const valorTotal = productos.reduce((s,p)=> s + (Number(p.cost)||0)*(Number(p.stock)||0), 0);
-      const filas = productos.map(p=>`<tr><td>${escapeHTML(p.name)}</td><td class="num">${formatMoney(p.cost||0)}</td><td class="num">${p.stock}</td><td class="num">${formatMoney((p.cost||0)*p.stock)}</td></tr>`).join('');
+      const valorTotal = productos.reduce((s,p)=> s + (esIlimitado(p) ? 0 : (Number(p.cost)||0)*(Number(p.stock)||0)), 0);
+      const filas = productos.map(p=>`<tr><td>${escapeHTML(p.name)}</td><td class="num">${formatMoney(p.cost||0)}</td><td class="num">${esIlimitado(p)?'Ilimitado':p.stock}</td><td class="num">${esIlimitado(p)?'—':formatMoney((p.cost||0)*p.stock)}</td></tr>`).join('');
       el.innerHTML = `
         <div class="detail-section">
           <div class="panel-header" style="margin-bottom:10px;">
@@ -786,7 +888,7 @@
         const desde = desdeInput.value;
         const hasta = hastaInput.value;
         const filtrados = (turnos||[]).filter(t=>{
-          const fecha = (t.fecha_cierre||'').slice(0,10);
+          const fecha = t.fecha_cierre ? new Date(t.fecha_cierre).toLocaleDateString('en-CA') : '';
           return (!desde || fecha>=desde) && (!hasta || fecha<=hasta);
         });
         document.getElementById('cortesTablaWrap').innerHTML = `
@@ -811,7 +913,7 @@
         `;
         el.querySelectorAll('[data-ver-corte]').forEach(btn=>{
           btn.addEventListener('click', ()=>{
-            const t = turnos.find(x=>x.id===btn.dataset.verCorte);
+            const t = (turnos||[]).find(x=>x.id===btn.dataset.verCorte);
             if(!t) return;
             const fila = (label, esperado, contado)=> `
               <div class="detail-grid" style="grid-template-columns:1fr 1fr 1fr; margin-bottom:6px;">
@@ -819,7 +921,7 @@
                 <div><span>Esperado</span>${formatMoney(esperado)}</div>
                 <div><span>Contado</span>${formatMoney(contado)}</div>
               </div>`;
-            openModal('Detalle del corte', `
+            abrirDetalleEncima('Detalle del corte', `
               <div class="detail-section">
                 <div class="detail-grid" style="margin-bottom:14px;">
                   <div><span>Apertura</span>${t.fecha_apertura ? new Date(t.fecha_apertura).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'}) : '—'} · ${escapeHTML(t.cajero_apertura||'—')}</div>
@@ -830,8 +932,7 @@
                 ${fila('Transferencia', t.transferencia_esperado, t.transferencia_contado)}
                 ${fila('Terminal bancaria', t.terminal_esperado, t.terminal_contado)}
               </div>
-            `, `<button type="button" class="btn-primary" id="closeCorteDetail">Cerrar</button>`);
-            document.getElementById('closeCorteDetail').addEventListener('click', closeModal);
+            `);
           });
         });
       };
@@ -860,7 +961,7 @@
   function exportarInventarioExcel(negocio, productos){
     if(typeof XLSX === 'undefined'){ showToast('No se pudo cargar el generador de Excel.', 'error'); return; }
     const datos = [['Nombre','Categoría','SKU','Precio','Costo','Existencia','Stock mínimo']];
-    productos.forEach(p=> datos.push([p.name||'', p.category||'', p.sku||'', p.price||0, p.cost||0, p.stock||0, p.minStock||'']));
+    productos.filter(p=> !esIlimitado(p)).forEach(p=> datos.push([p.name||'', p.category||'', p.sku||'', p.price||0, p.cost||0, p.stock||0, p.minStock||'']));
     const ws = XLSX.utils.aoa_to_sheet(datos);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Inventario');
@@ -873,7 +974,7 @@
     output.innerHTML = '<p style="color:var(--ink-soft); margin-top:10px;">Calculando…</p>';
     const { data: ventas, error } = await supabaseClient.from('ventas').select('*')
       .eq('negocio_id', negocioId)
-      .gte('fecha_hora', desde+'T00:00:00').lte('fecha_hora', hasta+'T23:59:59');
+      .gte('fecha_hora', new Date(desde+'T00:00:00').toISOString()).lte('fecha_hora', new Date(hasta+'T23:59:59').toISOString());
     if(error){ output.innerHTML = '<p class="error-text">No se pudo generar.</p>'; return; }
     const ventasList = (ventas||[]).filter(v=> !v.cancelada);
     const porProducto = {};
@@ -989,8 +1090,8 @@
   async function generarReporte(negocioId, desde, hasta){
     const output = document.getElementById('reportOutput');
     output.innerHTML = '<p>Calculando…</p>';
-    const desdeISO = desde + 'T00:00:00';
-    const hastaISO = hasta + 'T23:59:59';
+    const desdeISO = new Date(desde + 'T00:00:00').toISOString();
+    const hastaISO = new Date(hasta + 'T23:59:59').toISOString();
     const [{ data: ventas, error: e1 }, { data: movs, error: e2 }, { data: snap, error: e3 }] = await Promise.all([
       supabaseClient.from('ventas').select('*').eq('negocio_id', negocioId).gte('fecha_hora', desdeISO).lte('fecha_hora', hastaISO),
       supabaseClient.from('movimientos_inventario').select('*').eq('negocio_id', negocioId).gte('fecha_hora', desdeISO).lte('fecha_hora', hastaISO),
@@ -1001,10 +1102,15 @@
     const ingreso = ventasList.reduce((s,v)=> s+Number(v.total), 0);
     const costoVendido = ventasList.reduce((s,v)=> s + (v.items||[]).reduce((s2,it)=> s2 + (Number(it.cost)||0)*Number(it.qty), 0), 0);
     const ganancia = ingreso - costoVendido;
-    const inversion = (movs||[]).reduce((s,m)=> s + Number(m.cantidad)*(Number(m.costo_unitario)||0), 0);
     const productos = (snap && snap.productos) || [];
-    const valorInventario = productos.reduce((s,p)=> s + (Number(p.cost)||0)*(Number(p.stock)||0), 0);
-    const inventarioFilas = productos.map(p=>`<tr><td>${escapeHTML(p.name)}</td><td class="num">${formatMoney(p.cost||0)}</td><td class="num">${p.stock}</td><td class="num">${formatMoney((p.cost||0)*p.stock)}</td></tr>`).join('');
+    const idsIlimitados = new Set(productos.filter(p=> esIlimitado(p)).map(p=> p.id));
+    const inversion = (movs||[]).filter(m=> !idsIlimitados.has(m.producto_id))
+      .reduce((s,m)=> s + Number(m.cantidad)*(Number(m.costo_unitario)||0), 0);
+    const fisicos = productos.filter(p=> !esIlimitado(p));
+    const cuantosIlimitados = productos.length - fisicos.length;
+    const valorInventario = fisicos.reduce((s,p)=> s + (Number(p.cost)||0)*(Number(p.stock)||0), 0);
+    // Lista "para contar físicamente": solo mercancía física (un servicio ilimitado no se puede contar)
+    const inventarioFilas = fisicos.map(p=>`<tr><td>${escapeHTML(p.name)}</td><td class="num">${formatMoney(p.cost||0)}</td><td class="num">${p.stock}</td><td class="num">${formatMoney((p.cost||0)*p.stock)}</td></tr>`).join('');
     const facturasPendientes = ventasList.filter(v=> v.requiere_factura);
     const facturasFilas = facturasPendientes.map(v=>{
       const df = v.datos_fiscales || {};
@@ -1026,6 +1132,7 @@
         <div class="report-card"><span class="summary-label">Valor del inventario actual</span><div class="v">${formatMoney(valorInventario)}</div></div>
       </div>
       <h4 style="margin-top:16px; font-family:'Space Grotesk',sans-serif; font-size:.9rem;">Inventario teórico actual (para contar físicamente)</h4>
+      ${cuantosIlimitados ? `<p style="font-size:.8rem; color:var(--ink-soft); margin:4px 0 0;">No se incluyen ${cuantosIlimitados} ${cuantosIlimitados===1?'servicio ilimitado':'servicios ilimitados'} (recargas): no son mercancía que se pueda contar.</p>` : ''}
       <div class="table-scroll" style="margin-top:8px;">
         <table class="data-table">
           <thead><tr><th>Producto</th><th class="num">Costo unit.</th><th class="num">Debería tener</th><th class="num">Valor</th></tr></thead>
