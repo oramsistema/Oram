@@ -290,6 +290,13 @@
   .corte-resultado.cuadra h4{ color:var(--green-700); }
   .corte-resultado.diferencia h4{ color:var(--red); }
   .corte-resultado h4{ margin:0 0 8px; font-size:1rem; }
+  .modal.modal-novedades{ max-width:560px; }
+  .novedades-grupo{ margin:16px 0 4px; font-size:.78rem; text-transform:uppercase; letter-spacing:.04em; color:var(--green-700); }
+  .novedades-version{ margin:14px 0 0; font-weight:700; color:var(--ink-soft); font-size:.8rem; }
+  .novedad{ padding:12px 14px; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface-alt); margin:8px 0; }
+  .novedad p{ margin:4px 0 6px; font-size:.85rem; color:var(--ink-soft); }
+  .novedad ol{ margin:6px 0 0 18px; padding:0; font-size:.85rem; }
+  .novedad li{ margin:2px 0; }
   .corte-detalle-row{ display:flex; justify-content:space-between; font-size:.88rem; padding:4px 0; border-bottom:1px solid rgba(0,0,0,.06); }
   .corte-detalle-row:last-child{ border-bottom:none; }
   .summary-card{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-md); padding:16px 18px; display:flex; flex-direction:column; gap:4px; }
@@ -388,6 +395,10 @@
           <button type="button" class="tab-item" data-action="switch-tab" data-tab="administracion" role="tab" aria-selected="false">
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z"/><path d="M9.5 12l1.8 1.8L14.5 10"/></svg>
             <span>Administración</span>
+          </button>
+          <button type="button" class="tab-item" data-action="open-novedades">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8L12 3z"/><path d="M18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8L18 15z"/></svg>
+            <span>Novedades</span>
           </button>
         </nav>
       </div>
@@ -552,6 +563,8 @@
     }
   }
 
+  // Si todavía no existía información guardada, es una instalación nueva: no necesita ver "novedades" de entrada
+  const NOVEDADES_DISPOSITIVO_NUEVO = (()=>{ try{ return !localStorage.getItem(STORAGE_KEY); }catch(e){ return false; } })();
   let state = loadState();
   let cart = [];
   let activeCategory = 'Todas';
@@ -1772,6 +1785,89 @@
     </div>`;
   }
   function closeModal(){ document.getElementById('modalRoot').innerHTML = ''; }
+
+  // ---------- Novedades de la actualización ----------
+  // Cada vez que se publica una versión nueva se agrega aquí un bloque con lo que cambió y los pasos para usarlo.
+  // La ventana aparece una sola vez por equipo (hasta que se toca "Entendido") y también está en el menú.
+  const VERSION_APP = '2026.10.06';
+  const NOVEDADES_KEY = 'oramNovedadesVistas_pos';
+  const NOVEDADES = [
+    { version:'2026.10.06', items:[
+      { para:'todos', titulo:'Buscador en Inventario',
+        detalle:'Encuentra un producto sin recorrer toda la lista. También está en Administración → Inventario.',
+        pasos:['Abre la pestaña Inventario.','Escribe en la casilla de arriba el nombre, la categoría o el código.','La lista muestra 15 productos: toca "Ver todo" para ver el resto.'] },
+      { para:'todos', titulo:'Pistola de códigos de barras más confiable',
+        detalle:'Ya no hace falta escanear varias veces: antes, si la computadora tardaba un instante, el código llegaba incompleto.',
+        pasos:['Escanea el producto como siempre.','Si sale el aviso amarillo "sin coincidencia", compara los números que muestra con el código del producto en Inventario.'] },
+      { para:'todos', titulo:'Cobro por monto (por ejemplo, huevo suelto)',
+        detalle:'Algunos productos se cobran por monto en vez de por pieza.',
+        pasos:['En Vender, toca el producto que dice "Cobro por monto".','Escribe cuántas piezas lleva el cliente (por ejemplo, 3).','Escribe cuánto cobras (por ejemplo, $10) y toca "Agregar a la venta".'] },
+      { para:'todos', titulo:'Paquetes y casilleros',
+        detalle:'Además de las piezas sueltas, ahora se puede vender el paquete completo.',
+        pasos:['En Vender busca el paquete (por ejemplo, "casillero de huevo").','Tócalo una vez: cobra el precio del paquete y descuenta todas sus piezas del inventario.'] },
+      { para:'todos', titulo:'Promociones automáticas',
+        detalle:'Si un producto tiene promoción (por ejemplo, 2 por $80), se aplica sola.',
+        pasos:['Agrega el producto a la venta como siempre.','Al llegar a las piezas de la promoción verás "Promo aplicada" y el total baja.'] },
+      { para:'todos', titulo:'Cortes legibles en modo oscuro',
+        detalle:'El resultado del corte de caja y los colores del negocio ahora se leen bien aunque la computadora esté en modo oscuro.' },
+      { para:'admin', titulo:'Registrar productos por piezas y por casillero',
+        detalle:'Un solo formulario para el huevo (o cualquier producto) suelto y por casillero.',
+        pasos:['Entra a Administración con tu PIN.','En Inventario toca "Agregar producto".','Marca "Venta por monto" y "Viene en paquetes" y llena los datos del casillero.','El precio de cada pieza se calcula solo.'] },
+      { para:'admin', titulo:'Recibir mercancía por paquetes',
+        detalle:'Registra los casilleros que llegan sin hacer cuentas.',
+        pasos:['En Inventario toca "Recibir mercancía".','Elige el producto y en "Recibir en" escoge Paquetes.','Escribe cuántos paquetes llegaron y cuánto costó cada uno.'] },
+      { para:'admin', titulo:'Promos y paquetes (pestaña nueva)',
+        detalle:'Crea promociones como 2 por $80 y otros tamaños de casillero.',
+        pasos:['Entra a Administración y abre "Promos y paquetes".','Toca "Agregar promoción" o "Agregar paquete".','Llena los datos y guarda.'] },
+      { para:'admin', titulo:'Servicios ilimitados (recargas)',
+        detalle:'Las recargas no cuentan como mercancía: no inflan el inventario ni aparecen como compra en Finanzas.',
+        pasos:['En Administración → Inventario toca "Agregar producto".','Marca "Servicio ilimitado".'] }
+    ]}
+  ];
+  let novedadesProgramadas = false;
+  function novedadesVistas(){ try{ return localStorage.getItem(NOVEDADES_KEY) || ''; }catch(e){ return ''; } }
+  function marcarNovedadesVistas(){ try{ localStorage.setItem(NOVEDADES_KEY, VERSION_APP); }catch(e){} }
+  function htmlTarjetaNovedad(it){
+    return `<div class="novedad"><strong>${escapeHTML(it.titulo)}</strong>`
+      + (it.detalle ? `<p>${escapeHTML(it.detalle)}</p>` : '')
+      + ((it.pasos && it.pasos.length) ? `<ol>${it.pasos.map(p=>`<li>${escapeHTML(p)}</li>`).join('')}</ol>` : '')
+      + `</div>`;
+  }
+  function abrirNovedades(manual){
+    const vista = novedadesVistas();
+    let versiones = manual ? NOVEDADES.slice(0,1) : NOVEDADES.filter(n=> n.version > vista);
+    versiones = versiones.slice().sort((a,b)=> a.version < b.version ? 1 : -1);
+    if(!versiones.length) return;
+    const cuerpo = versiones.map(v=>{
+      const todos = v.items.filter(i=> i.para==='todos');
+      const admin = v.items.filter(i=> i.para==='admin');
+      return (versiones.length>1 ? `<p class="novedades-version">Versión ${escapeHTML(v.version)}</p>` : '')
+        + (todos.length ? `<h4 class="novedades-grupo">Para todos</h4>${todos.map(htmlTarjetaNovedad).join('')}` : '')
+        + (admin.length ? `<h4 class="novedades-grupo">Para el dueño · en Administración (pide tu PIN)</h4>${admin.map(htmlTarjetaNovedad).join('')}` : '');
+    }).join('');
+    openModal('Novedades de esta actualización',
+      `<p style="font-size:.88rem; color:var(--ink-soft); margin:0 0 6px;">Esto es lo nuevo. Cada punto trae los pasos para usarlo.</p>${cuerpo}`,
+      manual
+        ? `<button type="button" class="btn-primary" data-action="novedades-entendido">Entendido</button>`
+        : `<button type="button" class="btn-ghost" data-action="close-modal">Verlo después</button>
+           <button type="button" class="btn-primary" data-action="novedades-entendido">Entendido</button>`);
+    const m = document.querySelector('#modalRoot .modal');
+    if(m) m.classList.add('modal-novedades');
+  }
+  function programarNovedades(){
+    if(novedadesProgramadas) return;
+    novedadesProgramadas = true;
+    if(NOVEDADES_DISPOSITIVO_NUEVO && !novedadesVistas()){ marcarNovedadesVistas(); return; }
+    if(!NOVEDADES.some(n=> n.version > novedadesVistas())) return;
+    const intentar = (n)=>{
+      const hayModal = document.getElementById('modalRoot').innerHTML.trim() !== '';
+      const hayBloqueo = document.getElementById('blockOverlayRoot').innerHTML.trim() !== '';
+      // No interrumpe: si hay otra ventana abierta o una venta en curso, espera y vuelve a intentar
+      if((hayModal || hayBloqueo || cart.length) && n < 8){ setTimeout(()=> intentar(n+1), 5000); return; }
+      if(!hayModal && !hayBloqueo) abrirNovedades(false);
+    };
+    setTimeout(()=> intentar(0), 900);
+  }
 
   function openSaleConfirmModal(sale){
     openModal('Venta registrada', `
@@ -3686,6 +3782,8 @@
       case 'edit-paquete': openPaqueteModal(btn.dataset.pid, id); break;
       case 'save-paquete': handleSavePaquete(btn.dataset.pid, id); break;
       case 'save-monto': handleSaveMonto(id); break;
+      case 'open-novedades': { const mw = document.getElementById('menuWrap'); if(mw) mw.classList.remove('open'); abrirNovedades(true); break; }
+      case 'novedades-entendido': marcarNovedadesVistas(); closeModal(); break;
       case 'inventario-ver-todo': inventarioVerTodo = true; renderInventory(); break;
       case 'inventario-ver-menos': inventarioVerTodo = false; renderInventory(); break;
       case 'inventario-admin-ver-todo': adminInventarioVerTodo = true; renderInventarioAdminList(); break;
@@ -3761,19 +3859,28 @@
   // Se detecta por esa velocidad, sin importar en qué campo esté el cursor
   // (o si no hay ninguno enfocado), y se agrega directo al carrito — igual
   // que el escáner remoto por celular.
+  //
+  // La velocidad se mide con la hora en que se GENERÓ cada tecla (e.timeStamp), no con la
+  // hora en que el navegador alcanza a procesarla: si el equipo está ocupado (sincronizando,
+  // dibujando la lista de productos) las teclas se atrasan, y medir al procesarlas hacía
+  // pensar que la lectura era "lenta" y descartaba el código.
   let scanBuffer = '';
+  let scanFirstTime = 0;
   let scanLastTime = 0;
-  const SCAN_MAX_GAP_MS = 40;
+  const SCAN_MAX_GAP_MS = 120;   // pausa máxima entre dos caracteres seguidos de una misma lectura
+  const SCAN_MAX_AVG_MS = 60;    // velocidad promedio máxima por carácter (una persona teclea mucho más lento)
   document.addEventListener('keydown', function(e){
     if(e.key === 'Enter'){
-      procesarPosibleEscaneoUSB(scanBuffer);
+      const n = scanBuffer.length;
+      const promedio = n>1 ? (scanLastTime - scanFirstTime)/(n-1) : Infinity;
+      if(promedio <= SCAN_MAX_AVG_MS) procesarPosibleEscaneoUSB(scanBuffer);
       scanBuffer = '';
       return;
     }
     if(e.key.length !== 1){ return; } // ignora Shift, Tab, flechas, etc.
-    const ahora = Date.now();
-    if(ahora - scanLastTime > SCAN_MAX_GAP_MS){ scanBuffer = ''; }
-    scanLastTime = ahora;
+    const t = (typeof e.timeStamp==='number' && e.timeStamp>0) ? e.timeStamp : performance.now();
+    if(t - scanLastTime > SCAN_MAX_GAP_MS){ scanBuffer = ''; scanFirstTime = t; }
+    scanLastTime = t;
     scanBuffer += e.key;
   });
   function procesarPosibleEscaneoUSB(codigoCrudo){
@@ -3844,6 +3951,7 @@
       flushSync();
       if(state.turnoActual) iniciarPollEscaneos();
     }
+    programarNovedades();
   }
 
   function boot(){
