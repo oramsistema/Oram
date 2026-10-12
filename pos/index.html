@@ -2593,17 +2593,77 @@
   }
 
   // ---------- Bandeja de escaneos remotos (desde escaner.html) ----------
+  // ---------- Escáner del celular: avisos en tiempo real + consulta de respaldo ----------
+  // Antes el POS le preguntaba a la nube cada 2 segundos si había escaneos nuevos (30 consultas por minuto,
+  // aunque nadie escaneara). Ahora la nube le AVISA en cuanto llega uno (Realtime) y el POS solo hace una
+  // consulta de respaldo cada 20 segundos, por si algún aviso se pierde. Si Realtime no está disponible o
+  // se cae la conexión, vuelve a preguntar cada 2 segundos, como antes: no se pierde ningún escaneo.
+  const POLL_ESCANEO_RAPIDO_MS = 2000;
+  const POLL_ESCANEO_RESPALDO_MS = 20000;
   let pollEscaneosId = null;
+  let canalEscaneos = null;
+  let procesandoEscaneos = false;
+  let repetirEscaneos = false;
+  function fijarPollEscaneos(ms){
+    if(pollEscaneosId) clearInterval(pollEscaneosId);
+    pollEscaneosId = setInterval(procesarEscaneosPendientes, ms);
+  }
+  function detenerCanalEscaneos(){
+    const canal = canalEscaneos;
+    canalEscaneos = null;
+    if(canal){ try{ supabaseClient.removeChannel(canal); }catch(e){} }
+  }
+  function suscribirEscaneosRealtime(){
+    detenerCanalEscaneos();
+    if(!cloudEnabled || !state.turnoActual || !supabaseClient || typeof supabaseClient.channel !== 'function') return;
+    const turnoId = state.turnoActual.id;
+    try{
+      const canal = supabaseClient.channel('escaneos-' + turnoId);
+      canalEscaneos = canal;
+      canal
+        .on('postgres_changes', { event:'INSERT', schema:'public', table:'escaneos_pendientes', filter:'turno_id=eq.' + turnoId },
+          ()=>{ if(canalEscaneos === canal) procesarEscaneosPendientes(); })
+        .subscribe((estado)=>{
+          if(canalEscaneos !== canal) return;           // aviso de un canal anterior: se ignora
+          if(estado === 'SUBSCRIBED'){
+            if(pollEscaneosId) fijarPollEscaneos(POLL_ESCANEO_RESPALDO_MS);
+            procesarEscaneosPendientes();               // recoge lo que haya llegado mientras se conectaba
+          }else if(estado === 'CHANNEL_ERROR' || estado === 'TIMED_OUT' || estado === 'CLOSED'){
+            if(pollEscaneosId) fijarPollEscaneos(POLL_ESCANEO_RAPIDO_MS);   // sin Realtime: como antes
+          }
+        });
+    }catch(e){ /* Realtime no disponible: se queda preguntando cada 2 segundos */ }
+  }
   function iniciarPollEscaneos(){
     if(pollEscaneosId) return;
-    pollEscaneosId = setInterval(procesarEscaneosPendientes, 2000);
+    fijarPollEscaneos(POLL_ESCANEO_RAPIDO_MS);   // arranca como siempre; si Realtime conecta, baja al respaldo
     procesarEscaneosPendientes();
+    suscribirEscaneosRealtime();
   }
   function detenerPollEscaneos(){
     if(pollEscaneosId){ clearInterval(pollEscaneosId); pollEscaneosId = null; }
+    detenerCanalEscaneos();
   }
+  // Al volver a la pantalla o recuperar internet, revisa al instante (por si la computadora estuvo dormida)
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && pollEscaneosId) procesarEscaneosPendientes(); });
+  window.addEventListener('online', ()=>{ if(pollEscaneosId) procesarEscaneosPendientes(); });
+
+  // Una sola revisión a la vez: si llegan dos avisos pegados, la segunda espera su turno
+  // (así un mismo código nunca se agrega dos veces al carrito).
   async function procesarEscaneosPendientes(){
     if(!cloudEnabled || !state.turnoActual) return;
+    if(procesandoEscaneos){ repetirEscaneos = true; return; }
+    procesandoEscaneos = true;
+    try{
+      do{
+        repetirEscaneos = false;
+        await recogerEscaneosPendientes();
+      }while(repetirEscaneos && state.turnoActual);
+    }finally{
+      procesandoEscaneos = false;
+    }
+  }
+  async function recogerEscaneosPendientes(){
     try{
       const { data, error } = await supabaseClient
         .from('escaneos_pendientes')
