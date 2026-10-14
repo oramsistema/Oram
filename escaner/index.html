@@ -59,6 +59,12 @@
   .scan-video{ flex:1; width:100%; object-fit:cover; background:#000; }
   .scan-frame{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:82%; max-width:380px; height:130px; border:3px solid var(--green-500); border-radius:14px; box-shadow:0 0 0 2000px rgba(0,0,0,.4); pointer-events:none; }
   .scan-hint{ position:absolute; bottom:290px; left:0; right:0; text-align:center; color:#fff; font-size:.92rem; }
+  .scan-hint small{ display:block; margin-top:4px; font-size:.76rem; opacity:.8; }
+  .scan-tools{ position:absolute; top:64px; right:12px; display:flex; flex-direction:column; gap:8px; z-index:3; }
+  .scan-tool{ background:rgba(0,0,0,.55); color:#fff; border:1px solid rgba(255,255,255,.4); padding:9px 14px; border-radius:999px; font-size:.8rem; font-weight:700; cursor:pointer; min-width:88px; }
+  .scan-tool.on{ background:var(--green-600); border-color:var(--green-500); }
+  .scan-focus-ring{ position:absolute; top:50%; left:50%; width:84px; height:84px; margin:-42px 0 0 -42px; border:2px solid #fff; border-radius:50%; pointer-events:none; z-index:3; animation:ringFoco .9s ease-out forwards; }
+  @keyframes ringFoco{ from{ transform:scale(1.5); opacity:1; } to{ transform:scale(.8); opacity:0; } }
   .trigger-btn{
     position:absolute; bottom:150px; left:50%; transform:translateX(-50%);
     width:120px; height:120px; border-radius:999px; border:4px solid #fff;
@@ -82,7 +88,55 @@
   }
   const SUPABASE_URL = 'https://waahxnhexfvpaypwsvqg.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_c9LODHYI87bNwTi2XaYKDw_dzvIKV2o';
-  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  // ---------- Privacidad entre clientes: cada petición dice a qué negocio pertenece ----------
+  // El encabezado solo se manda si una comprobación previa confirmó que el navegador lo acepta.
+  const CLAVE_ENCABEZADO = 'oramEncabezado';
+  let encabezadoNegocioId = null;
+  let sondeoEncabezadoId = null;
+  function encabezadoPermitido(){ try{ return localStorage.getItem(CLAVE_ENCABEZADO) === 'ok'; }catch(e){ return false; } }
+  function fetchConEncabezado(url, opciones){
+    opciones = opciones || {};
+    const id = sondeoEncabezadoId || (encabezadoPermitido() ? encabezadoNegocioId : null);
+    if(id && String(url).indexOf(SUPABASE_URL) === 0){
+      const h = new Headers(opciones.headers || {});
+      h.set('x-negocio-id', id);
+      opciones = Object.assign({}, opciones, { headers: h });
+    }
+    return window.fetch(url, opciones);
+  }
+  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global:{ fetch: fetchConEncabezado } });
+  async function probarEncabezado(id){
+    if(!id || !navigator.onLine) return 'desconocido';
+    sondeoEncabezadoId = id;
+    let r;
+    try{ r = await supabaseClient.rpc('negocio_de_la_peticion'); }
+    catch(e){ r = { data:null, error:{ message:'TypeError: Failed to fetch' } }; }
+    finally{ sondeoEncabezadoId = null; }
+    let resultado;
+    if(r && r.error){
+      const msg = String(r.error.message || '') + ' ' + String(r.error.code || '');
+      resultado = /PGRST202|42883|Could not find the function/i.test(msg) ? 'sin_funcion' : 'bloqueado';
+    }else{
+      resultado = (r && r.data === id) ? 'listo' : 'no_llega';
+    }
+    if(resultado === 'listo' || resultado === 'sin_funcion'){ try{ localStorage.setItem(CLAVE_ENCABEZADO, 'ok'); }catch(e){} }
+    return resultado;
+  }
+  // Entrar con el código del negocio: primero con la función segura (devuelve SOLO ese negocio);
+  // si todavía no existe en Supabase, con la consulta de siempre.
+  async function buscarNegocioPorCodigo(codigo, columnas){
+    try{
+      const { data, error } = await supabaseClient.rpc('buscar_negocio', { p_codigo: codigo });
+      if(!error){
+        if(!data) return { data: null, error: null };
+        const filtrado = {};
+        columnas.split(',').map(c=> c.trim()).forEach(c=>{ filtrado[c] = data[c]; });
+        return { data: filtrado, error: null };
+      }
+      if(!/PGRST202|42883|Could not find the function/i.test(String(error.message || '') + String(error.code || ''))) return { data: null, error };
+    }catch(e){ /* sin la función: se usa la consulta de siempre */ }
+    return await supabaseClient.from('negocios_estatus_publico').select(columnas).ilike('codigo', codigo).maybeSingle();
+  }
 
   const BARCODE_FORMATS = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','codabar','itf'];
 
@@ -162,15 +216,13 @@
 
   async function intentarVincular(codigoNegocio, codigoCajero){
     try{
-      const { data: negocioData, error: negocioErr } = await supabaseClient
-        .from('negocios_estatus_publico')
-        .select('id, codigo, estatus, nombre_negocio')
-        .ilike('codigo', codigoNegocio)
-        .maybeSingle();
+      const { data: negocioData, error: negocioErr } = await buscarNegocioPorCodigo(codigoNegocio, 'id, codigo, estatus, nombre_negocio');
       if(negocioErr){ renderVinculo('Error al buscar: ' + (negocioErr.message||'')); return; }
       if(!negocioData){ renderVinculo('No se encontró ese código de negocio.'); return; }
       if(negocioData.estatus === 'suspendido'){ renderVinculo('Este negocio tiene el servicio suspendido.'); return; }
 
+      encabezadoNegocioId = negocioData.id;
+      await probarEncabezado(negocioData.id);      // comprueba que el encabezado funciona antes de seguir
       const { data: cajeros, error: cajeroErr } = await supabaseClient
         .from('cajeros').select('*').eq('negocio_id', negocioData.id).eq('activo', true);
       if(cajeroErr){ renderVinculo('Error al buscar cajeros: ' + (cajeroErr.message||'')); return; }
@@ -214,6 +266,7 @@
   async function reanudarSesionGuardada(){
     const sesion = cargarSesionEscaner();
     if(!sesion || !sesion.negocio || !sesion.cajero || !sesion.turno) return false;
+    encabezadoNegocioId = sesion.negocio.id;
     try{
       const { data } = await supabaseClient.from('turnos').select('*').eq('id', sesion.turno.id).maybeSingle();
       if(data && data.estado === 'abierto'){
@@ -240,19 +293,22 @@
           <button type="button" class="scan-exit" id="salirBtn">Salir</button>
         </div>
         <video id="scanVideo" class="scan-video" autoplay playsinline muted></video>
+        <div id="scanTools" class="scan-tools"></div>
         <div class="scan-frame"></div>
-        <p class="scan-hint">Apunta la cámara, luego mantén presionado el botón</p>
+        <p class="scan-hint">Apunta la cámara, luego mantén presionado el botón<small id="scanAyuda">Si se ve borroso, aleja un poco el celular. Toca la pantalla para enfocar.</small></p>
         <button type="button" id="triggerBtn" class="trigger-btn">Mantén presionado para leer</button>
         <div id="scanFeed" class="scan-feed"></div>
       </div>`;
     document.getElementById('salirBtn').addEventListener('click', salir);
+    document.getElementById('scanVideo').addEventListener('click', enfocarAlCentro);
     const triggerBtn = document.getElementById('triggerBtn');
-    const activarDisparador = (e)=>{
+    const activarDisparador = async (e)=>{
       e.preventDefault();
       try{
         if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         if(audioCtx.state === 'suspended') audioCtx.resume();
       }catch(err){ /* audio no disponible: se ignora */ }
+      await asegurarCamaraViva();
       disparadorActivo = true; triggerBtn.classList.add('activo'); scannerLoop();
     };
     const desactivarDisparador = ()=>{ disparadorActivo = false; triggerBtn.classList.remove('activo'); };
@@ -283,14 +339,188 @@
     vigilanciaTurnoId = setInterval(verificarTurnoSigueAbierto, 20000);
   }
 
+  // Revisa, justo antes de escanear, si la cámara sigue realmente viva (y no
+  // solo "parece" abierta). Si el sistema se la quitó en algún momento sin
+  // que nos diéramos cuenta, la reconecta ahí mismo, sin depender de que el
+  // celular avise correctamente cuándo cambiaste de pantalla.
+  async function asegurarCamaraViva(){
+    const track = scannerStream ? scannerStream.getVideoTracks()[0] : null;
+    if(track && track.readyState === 'live'){ return; }
+    if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
+    try{
+      const stream = await pedirCamara();
+      scannerStream = stream;
+      const video = document.getElementById('scanVideo');
+      if(video){ video.srcObject = stream; }
+      if(!scannerDetector){ scannerDetector = new window.BarcodeDetector({ formats: BARCODE_FORMATS }); }
+      afinarCamara(stream);
+    }catch(err){ /* si falla, se reintentará en el siguiente intento de escaneo */ }
+  }
+
+  // ---------- Cámara: más resolución, enfoque continuo, zoom, luz y elección de lente ----------
+  // Antes se le pedía al teléfono solo "la cámara trasera", y muchos celulares (sobre todo de gama media)
+  // entregan entonces una imagen chica y sin enfoque continuo. Ahora se pide Full HD y enfoque continuo,
+  // y se ofrecen zoom, linterna y cambio de lente cuando el teléfono los permite.
+  const CAM_ID_KEY = 'oramEscanerCamaraId';
+  const CAM_ZOOM_KEY = 'oramEscanerZoom';
+  let camaraCaps = {};
+  let camarasTraseras = [];
+  let zoomActual = 1;
+  let linternaEncendida = false;
+  function leerLocal(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+  function guardarLocal(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
+  function restriccionesCamara(){
+    const video = { width:{ ideal:1920 }, height:{ ideal:1080 }, frameRate:{ ideal:30 }, facingMode:{ ideal:'environment' } };
+    const id = leerLocal(CAM_ID_KEY);
+    if(id) video.deviceId = { ideal:id };
+    return { video, audio:false };
+  }
+  async function pedirCamara(){
+    try{
+      return await navigator.mediaDevices.getUserMedia(restriccionesCamara());
+    }catch(err){
+      if(err && (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError')){
+        // la calidad o el lente guardado ya no se puede: se abre como se hacía antes
+        return await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+      }
+      throw err;
+    }
+  }
+  function pistaDeCamara(){
+    return scannerStream && scannerStream.getVideoTracks ? scannerStream.getVideoTracks()[0] : null;
+  }
+  async function listarCamarasTraseras(){
+    camarasTraseras = [];
+    try{
+      const lista = await navigator.mediaDevices.enumerateDevices();
+      camarasTraseras = lista.filter(d=> d.kind === 'videoinput' && !/front|frontal|user|selfie|delantera/i.test(d.label || ''));
+    }catch(e){ /* sin lista de cámaras: no se ofrece el cambio de lente */ }
+  }
+  async function afinarCamara(stream){
+    const pista = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
+    camaraCaps = {};
+    linternaEncendida = false;
+    if(pista){
+      try{ camaraCaps = (pista.getCapabilities ? pista.getCapabilities() : {}) || {}; }catch(e){ camaraCaps = {}; }
+      try{
+        if(camaraCaps.focusMode && camaraCaps.focusMode.includes('continuous')){
+          await pista.applyConstraints({ advanced:[{ focusMode:'continuous' }] });
+        }
+      }catch(e){ /* este teléfono no deja cambiar el enfoque: se queda como viene */ }
+      try{
+        if(camaraCaps.zoom){
+          const guardado = parseFloat(leerLocal(CAM_ZOOM_KEY));
+          zoomActual = Math.min(Math.max(isNaN(guardado) ? camaraCaps.zoom.min : guardado, camaraCaps.zoom.min), camaraCaps.zoom.max);
+          await pista.applyConstraints({ advanced:[{ zoom:zoomActual }] });
+        }
+      }catch(e){ /* sin zoom */ }
+    }
+    await listarCamarasTraseras();
+    pintarHerramientas();
+  }
+  function indiceCamaraActual(){
+    const pista = pistaDeCamara();
+    let id = null;
+    try{ id = pista && pista.getSettings ? pista.getSettings().deviceId : null; }catch(e){}
+    const i = camarasTraseras.findIndex(c=> c.deviceId === id);
+    return i >= 0 ? i : 0;
+  }
+  function formatoZoom(z){ return (Math.round(z*10)/10).toString().replace(/\.0$/, ''); }
+  function pintarHerramientas(){
+    const el = document.getElementById('scanTools');
+    if(!el) return;
+    const botones = [];
+    if(camaraCaps.zoom && camaraCaps.zoom.max >= camaraCaps.zoom.min * 2){
+      botones.push(`<button type="button" class="scan-tool" id="zoomBtn">Zoom ${formatoZoom(zoomActual)}×</button>`);
+    }
+    if(camaraCaps.torch){
+      botones.push(`<button type="button" class="scan-tool ${linternaEncendida ? 'on' : ''}" id="luzBtn">Luz</button>`);
+    }
+    if(camarasTraseras.length > 1){
+      botones.push(`<button type="button" class="scan-tool" id="camBtn">Cámara ${indiceCamaraActual()+1}/${camarasTraseras.length}</button>`);
+    }
+    el.innerHTML = botones.join('');
+    // La ayuda solo menciona lo que ESTE teléfono sí tiene
+    const ayuda = document.getElementById('scanAyuda');
+    if(ayuda){
+      const opciones = ['aleja un poco el celular'];
+      if(botones.some(b=> b.includes('id="zoomBtn"'))) opciones.push('usa el zoom');
+      if(botones.some(b=> b.includes('id="camBtn"'))) opciones.push('toca Cámara');
+      const lista = opciones.length > 1 ? opciones.slice(0, -1).join(', ') + ' o ' + opciones[opciones.length - 1] : opciones[0];
+      ayuda.textContent = `Si se ve borroso, ${lista}. Toca la pantalla para enfocar.`;
+    }
+    const zoomBtn = document.getElementById('zoomBtn');
+    if(zoomBtn) zoomBtn.addEventListener('click', cambiarZoom);
+    const luzBtn = document.getElementById('luzBtn');
+    if(luzBtn) luzBtn.addEventListener('click', alternarLuz);
+    const camBtn = document.getElementById('camBtn');
+    if(camBtn) camBtn.addEventListener('click', cambiarCamara);
+  }
+  async function cambiarZoom(){
+    const pista = pistaDeCamara();
+    if(!pista || !camaraCaps.zoom) return;
+    const min = camaraCaps.zoom.min, max = camaraCaps.zoom.max;
+    const niveles = [min, min*2, min*3].filter(n=> n <= max + 0.001);
+    const siguiente = niveles.find(n=> n > zoomActual + 0.05) || niveles[0];
+    try{
+      await pista.applyConstraints({ advanced:[{ zoom:siguiente }] });
+      zoomActual = siguiente;
+      guardarLocal(CAM_ZOOM_KEY, String(siguiente));
+    }catch(e){ /* sin zoom */ }
+    pintarHerramientas();
+  }
+  async function alternarLuz(){
+    const pista = pistaDeCamara();
+    if(!pista) return;
+    try{
+      await pista.applyConstraints({ advanced:[{ torch: !linternaEncendida }] });
+      linternaEncendida = !linternaEncendida;
+    }catch(e){ /* sin linterna */ }
+    pintarHerramientas();
+  }
+  function cambiarCamara(){
+    if(camarasTraseras.length < 2) return;
+    const siguiente = camarasTraseras[(indiceCamaraActual() + 1) % camarasTraseras.length];
+    guardarLocal(CAM_ID_KEY, siguiente.deviceId);
+    if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
+    abrirCamara();
+  }
+  let enfocandoTimer = null;
+  async function enfocarAlCentro(){
+    const pista = pistaDeCamara();
+    const pantalla = document.querySelector('.scan-screen');
+    if(pantalla){
+      const aro = document.createElement('div');
+      aro.className = 'scan-focus-ring';
+      pantalla.appendChild(aro);
+      setTimeout(()=>{ if(aro.parentNode) aro.parentNode.removeChild(aro); }, 950);
+    }
+    if(!pista || !camaraCaps.focusMode) return;
+    try{
+      if(camaraCaps.focusMode.includes('single-shot')){
+        await pista.applyConstraints({ advanced:[
+          { focusMode:'single-shot', pointsOfInterest:[{ x:0.5, y:0.5 }] },
+          { focusMode:'single-shot' }
+        ]});
+        clearTimeout(enfocandoTimer);
+        enfocandoTimer = setTimeout(()=>{
+          try{
+            if(camaraCaps.focusMode.includes('continuous')) pista.applyConstraints({ advanced:[{ focusMode:'continuous' }] }).catch(()=>{});
+          }catch(e){}
+        }, 1500);
+      }
+    }catch(e){ /* este teléfono no deja enfocar por toque */ }
+  }
+
   function abrirCamara(){
-    navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } })
+    pedirCamara()
       .then(stream=>{
         scannerStream = stream;
         const video = document.getElementById('scanVideo');
         if(!video){ stream.getTracks().forEach(t=>t.stop()); return; }
         video.srcObject = stream;
         scannerDetector = new window.BarcodeDetector({ formats: BARCODE_FORMATS });
+        afinarCamara(stream);
       })
       .catch((err)=>{
         const detalle = err ? ((err.name||'Error') + (err.message ? ': '+err.message : '')) : 'Error desconocido';
@@ -312,6 +542,7 @@
     if(document.visibilityState === 'hidden'){
       if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
       scannerDetector = null;
+      linternaEncendida = false;
     }else if(document.visibilityState === 'visible'){
       if(!scannerStream && document.getElementById('scanVideo')){ abrirCamara(); }
     }
