@@ -2350,10 +2350,48 @@
         <td class="num">${formatMoney(s.manoObra||0)}</td>
         <td class="num">${formatMoney(costo)}</td>
         <td class="num" style="color:${ganancia<0?'var(--red)':'inherit'};">${formatMoney(ganancia)}</td>
-        <td class="row-actions">${gestiona ? `<button type="button" class="link-btn" data-action="servicio-editar" data-id="${s.id}">Editar</button>
-          <button type="button" class="link-btn danger" data-action="servicio-eliminar" data-id="${s.id}">Eliminar</button>` : ''}</td>
+        <td class="row-actions">
+          <button type="button" class="link-btn" data-action="servicio-ver" data-id="${s.id}">Ver</button>
+          <button type="button" class="link-btn" data-action="servicio-editar" data-id="${s.id}">Editar</button>
+          <button type="button" class="link-btn danger" data-action="servicio-eliminar" data-id="${s.id}">Eliminar</button>
+        </td>
       </tr>`;
     }).join('');
+  }
+  function abrirDetalleServicio(id){
+    const s = (state.servicios||[]).find(x=> x.id === id);
+    if(!s) return;
+    const costoMat = (s.materiales||[]).reduce((sum,m)=>{
+      const p = state.products.find(x=> x.id === m.productId);
+      return sum + (p ? (Number(p.cost)||0) * (Number(m.cantidad)||0) : 0);
+    }, 0);
+    const costo = costoMat + (Number(s.manoObra)||0);
+    const ganancia = Number(s.precio) - costo;
+    const alcanza = disponiblesServicio(s);
+    const filas = (s.materiales||[]).map(m=>{
+      const p = state.products.find(x=> x.id === m.productId);
+      return `<tr>
+        <td>${escapeHTML(p ? p.name : '(material borrado)')}</td>
+        <td class="num">${formatCantidad(m.cantidad)}</td>
+        <td class="num">${p ? (p.ilimitado ? 'sin límite' : formatCantidad(p.stock)) : '—'}</td>
+        <td class="num">${p ? formatMoney((Number(p.cost)||0) * (Number(m.cantidad)||0)) : '—'}</td>
+      </tr>`;
+    }).join('');
+    openModal(escapeHTML(s.nombre), `
+      <div style="display:grid; gap:6px; font-size:.9rem; margin-bottom:12px;">
+        <div><b>Precio al cliente:</b> ${formatMoney(s.precio)}</div>
+        <div><b>Mano de obra:</b> ${formatMoney(s.manoObra||0)}</div>
+        <div><b>Costo de materiales:</b> ${formatMoney(costoMat)}</div>
+        <div><b>Costo total:</b> ${formatMoney(costo)} · <b>Ganancia:</b> <span style="color:${ganancia<0?'var(--red)':'inherit'};">${formatMoney(ganancia)}</span></div>
+        <div><b>Con el material que hay, alcanza para:</b> ${alcanza === Infinity ? 'sin límite' : alcanza + ' servicio(s)'}</div>
+      </div>
+      ${filas ? `<div class="table-scroll"><table class="data-table">
+        <thead><tr><th>Material</th><th class="num">Por servicio</th><th class="num">Hay en inventario</th><th class="num">Costo</th></tr></thead>
+        <tbody>${filas}</tbody></table></div>` : '<p style="color:var(--ink-soft); font-size:.88rem;">Este servicio no usa materiales (solo mano de obra).</p>'}
+    `, `
+      ${puedeGestionar() ? `<button type="button" class="btn-secondary" data-action="servicio-editar" data-id="${s.id}">Editar</button>` : ''}
+      <button type="button" class="btn-primary" data-action="close-modal">Cerrar</button>`);
+    const m = document.querySelector('#modalRoot .modal'); if(m) m.classList.add('modal-ancho');
   }
   function materialesDisponibles(){
     return state.products.filter(p=> !p.ilimitado).slice().sort((a,b)=> a.name.localeCompare(b.name, 'es'));
@@ -5050,6 +5088,8 @@
     if(tab==='ventas') renderVentas();
     if(tab==='caja') renderCaja();
     if(tab==='administracion') renderAdministracion();
+    if(tab==='servicios') renderServicios();
+    if(tab==='compras') renderCompras();
   }
 
   // ---------- Toast ----------
@@ -5118,6 +5158,7 @@
       case 'compra-quitar-linea': quitarLineaCompra(Number(btn.dataset.i)); break;
       case 'compra-guardar': guardarCompra(); break;
       case 'servicio-nuevo': abrirServicioModal(); break;
+      case 'servicio-ver': abrirDetalleServicio(id); break;
       case 'servicio-editar': abrirServicioModal(id); break;
       case 'servicio-eliminar': pedirEliminarServicio(id); break;
       case 'servicio-eliminar-ok': eliminarServicio(id); break;
