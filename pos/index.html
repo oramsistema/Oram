@@ -941,6 +941,7 @@
   }
   async function verificarEstatus(){
     if(!cloudEnabled || !state.negocioId) return;
+    ultimaVerificacionEstatus = Date.now();
     try{
       const { data, error } = await supabaseClient
         .from('negocios_estatus_publico')
@@ -1110,7 +1111,16 @@
   window.addEventListener('online', flushSync);
   window.addEventListener('online', updateSyncPill);
   window.addEventListener('offline', updateSyncPill);
-  if(cloudEnabled){ setInterval(flushSync, 30000); setInterval(verificarEstatus, 30000); }
+  // El estatus y la licencia se revisan cada 5 minutos (antes cada 30 segundos: eran ~5,700 consultas al día por equipo)
+  // y, además, en cuanto se vuelve a la ventana o regresa el internet (máximo una vez por minuto).
+  let ultimaVerificacionEstatus = 0;
+  function verificarEstatusPronto(){ if(Date.now() - ultimaVerificacionEstatus > 60000) verificarEstatus(); }
+  if(cloudEnabled){
+    setInterval(flushSync, 30000);
+    setInterval(verificarEstatus, 5*60*1000);
+    window.addEventListener('focus', verificarEstatusPronto);
+    window.addEventListener('online', verificarEstatusPronto);
+  }
 
 
   // ---------- Helpers ----------
