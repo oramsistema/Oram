@@ -100,6 +100,9 @@
   .modal-header h3{ font-size:1.1rem; }
   .modal-close{ background:none; border:none; font-size:1.3rem; cursor:pointer; color:var(--ink-soft); }
   .modal-body{ padding:20px 22px; }
+  .modulo-row{ display:flex; gap:12px; align-items:flex-start; padding:12px 0; border-bottom:1px solid var(--line); cursor:pointer; }
+  .modulo-row input{ margin-top:4px; width:18px; height:18px; flex:none; }
+  .modulo-row small{ color:var(--ink-soft); }
   /* Ficha del cliente a pantalla completa */
   .modal-overlay.modal-overlay-full{ padding:0; align-items:stretch; background:var(--bg); overflow:hidden; }
   .modal.modal-full{ max-width:none; width:100%; height:100%; max-height:none; border-radius:0; box-shadow:none; margin:0; display:flex; flex-direction:column; overflow:hidden; }
@@ -184,6 +187,20 @@
 
   // Un servicio ilimitado (recargas) no es mercancía física: no cuenta en inventario ni en su valor.
   // Se reconoce por su marca o, por si faltara, por la cantidad simbólica de 999,999,999 piezas.
+  // Supabase entrega máximo 1,000 filas por consulta; esto pide por tandas hasta traerlas todas.
+  async function traerTodo(armar, tam){
+    tam = tam || 1000;
+    let todo = [], desde = 0;
+    for(let pagina=0; pagina<500; pagina++){
+      const { data, error } = await armar().range(desde, desde + tam - 1);
+      if(error) return { data: null, error };
+      const filas = data || [];
+      if(!filas.length) break;
+      todo = todo.concat(filas);
+      desde += filas.length;
+    }
+    return { data: todo, error: null };
+  }
   function esIlimitado(p){
     return !!p.ilimitado || Number(p.stock) >= 999999999;
   }
@@ -418,9 +435,20 @@
   }
 
   // ---------- Novedades de la actualización ----------
-  const VERSION_ADMIN = '2026.10.06';
+  const VERSION_ADMIN = '2026.10.13';
   const NOVEDADES_ADMIN_KEY = 'oramNovedadesVistas_admin';
   const NOVEDADES_ADMIN = [
+    { version:'2026.10.13', items:[
+      { titulo:'Módulos por cliente',
+        detalle:'Activas por cliente: Servicios (taller), Gastos de caja y Compras por factura (farmacia). Todo viene apagado, así que a los demás clientes no les cambia nada.',
+        pasos:['Primero corre actualizacion_modulos.sql en el SQL Editor de Supabase (una sola vez).','Toca "Ver" en un cliente y abre la pestaña "Módulos".','Marca los módulos que necesita y toca "Guardar módulos".','El cliente los ve en su POS en unos minutos, o al volver a abrirlo.'] },
+      { titulo:'Reportes con todas las ventas',
+        detalle:'El Reporte y "Ventas por producto" ya no se cortan en 1,000 ventas: cuentan todas las del periodo, aunque sean miles.' },
+      { titulo:'Gastos de caja en los cortes',
+        detalle:'Si el cliente tiene el módulo, el detalle de cada corte muestra los gastos de caja que se descontaron del efectivo esperado.' },
+      { titulo:'Corrección en el POS: cortes y ventas canceladas',
+        detalle:'Antes, una venta cancelada se seguía sumando al efectivo esperado del corte y aparecía un faltante falso. Ya se corrigió en el POS. Los cortes anteriores no se recalculan: si ves un faltante igual al monto de una venta cancelada, esa es la causa.' }
+    ]},
     { version:'2026.10.06', items:[
       { titulo:'Ficha del cliente a pantalla completa',
         detalle:'Al abrir un cliente ahora ocupa toda la pantalla.',
@@ -577,6 +605,7 @@
         <button type="button" class="sub-tab-btn" data-subtab="inventario">Inventario</button>
         <button type="button" class="sub-tab-btn" data-subtab="usuarios">Usuarios</button>
         <button type="button" class="sub-tab-btn" data-subtab="cortes">Cortes</button>
+        <button type="button" class="sub-tab-btn" data-subtab="modulos">Módulos</button>
         <button type="button" class="sub-tab-btn" data-subtab="config">Marca y ticket</button>
         <button type="button" class="sub-tab-btn" data-subtab="reporte">Reporte</button>
       </div>
@@ -682,6 +711,38 @@
       document.getElementById('generarVentasProductoBtn').addEventListener('click', ()=> generarVentasPorProducto(negocio.id, invDesde.value, invHasta.value));
       generarVentasPorProducto(negocio.id, invDesde.value, invHasta.value);
 
+    }else if(clienteSubTab==='modulos'){
+      const mods = negocio.modulos || {};
+      const defs = [
+        ['servicios', 'Servicios', 'Servicios con materiales y mano de obra (taller mecánico y similares). Los materiales se descuentan del inventario al vender el servicio.'],
+        ['gastos', 'Gastos de caja', 'Registrar salidas de dinero de la caja chica. Se descuentan del efectivo esperado del corte.'],
+        ['compras', 'Compras por factura', 'Registrar la mercancía por factura (con carga de XML) y buscarla después por factura (farmacias y similares).']
+      ];
+      el.innerHTML = `
+        <div class="detail-section">
+          <h4>Módulos de este cliente</h4>
+          <p style="font-size:.85rem; color:var(--ink-soft); margin:4px 0 12px;">Todo viene apagado: con todo apagado, el POS del cliente se ve y funciona exactamente como siempre. Los cambios le llegan en unos minutos o al volver a abrir su POS.</p>
+          ${defs.map(([k, titulo, desc])=>`
+            <label class="modulo-row">
+              <input type="checkbox" data-modulo="${k}" ${mods[k] ? 'checked' : ''} />
+              <span><b>${titulo}</b><br><small>${desc}</small></span>
+            </label>`).join('')}
+          <button type="button" class="btn-primary btn-sm" id="guardarModulosBtn" style="margin-top:14px;">Guardar módulos</button>
+        </div>`;
+      document.getElementById('guardarModulosBtn').addEventListener('click', async ()=>{
+        const nuevos = {};
+        el.querySelectorAll('[data-modulo]').forEach(c=>{ nuevos[c.dataset.modulo] = !!c.checked; });
+        const { error } = await supabaseClient.from('negocios').update({ modulos: nuevos }).eq('id', negocio.id);
+        if(error){
+          const falta = /modulos|column|42703|PGRST204/i.test(String(error.message||'') + String(error.code||''));
+          showToast(falta ? 'Falta correr actualizacion_modulos.sql en Supabase (una sola vez).' : 'No se pudo guardar.', 'error');
+          return;
+        }
+        negocio.modulos = nuevos;
+        const enLista = (negocios||[]).find(n=> n.id === negocio.id);
+        if(enLista) enLista.modulos = nuevos;
+        showToast('Módulos guardados. El cliente los verá en unos minutos.', 'success');
+      });
     }else if(clienteSubTab==='config'){
       el.innerHTML = `
         <div class="detail-section">
@@ -927,6 +988,7 @@
                   <div><span>Apertura</span>${t.fecha_apertura ? new Date(t.fecha_apertura).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'}) : '—'} · ${escapeHTML(t.cajero_apertura||'—')}</div>
                   <div><span>Cierre</span>${t.fecha_cierre ? new Date(t.fecha_cierre).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'}) : '—'} · ${escapeHTML(t.cajero_cierre||'—')}</div>
                   <div><span>Fondo inicial</span>${formatMoney(t.fondo_inicial)}</div>
+                  ${Number(t.gastos_total) > 0 ? `<div><span>Gastos de caja (ya descontados)</span>${formatMoney(t.gastos_total)}</div>` : ''}
                 </div>
                 ${fila('Efectivo', t.efectivo_esperado, t.efectivo_contado)}
                 ${fila('Transferencia', t.transferencia_esperado, t.transferencia_contado)}
@@ -972,9 +1034,10 @@
     const output = document.getElementById('ventasProductoOutput');
     if(!output) return;
     output.innerHTML = '<p style="color:var(--ink-soft); margin-top:10px;">Calculando…</p>';
-    const { data: ventas, error } = await supabaseClient.from('ventas').select('*')
+    const { data: ventas, error } = await traerTodo(()=> supabaseClient.from('ventas').select('*')
       .eq('negocio_id', negocioId)
-      .gte('fecha_hora', new Date(desde+'T00:00:00').toISOString()).lte('fecha_hora', new Date(hasta+'T23:59:59').toISOString());
+      .gte('fecha_hora', new Date(desde+'T00:00:00').toISOString()).lte('fecha_hora', new Date(hasta+'T23:59:59').toISOString())
+      .order('fecha_hora', {ascending:true}).order('id', {ascending:true}));
     if(error){ output.innerHTML = '<p class="error-text">No se pudo generar.</p>'; return; }
     const ventasList = (ventas||[]).filter(v=> !v.cancelada);
     const porProducto = {};
@@ -1093,8 +1156,10 @@
     const desdeISO = new Date(desde + 'T00:00:00').toISOString();
     const hastaISO = new Date(hasta + 'T23:59:59').toISOString();
     const [{ data: ventas, error: e1 }, { data: movs, error: e2 }, { data: snap, error: e3 }] = await Promise.all([
-      supabaseClient.from('ventas').select('*').eq('negocio_id', negocioId).gte('fecha_hora', desdeISO).lte('fecha_hora', hastaISO),
-      supabaseClient.from('movimientos_inventario').select('*').eq('negocio_id', negocioId).gte('fecha_hora', desdeISO).lte('fecha_hora', hastaISO),
+      traerTodo(()=> supabaseClient.from('ventas').select('*').eq('negocio_id', negocioId).gte('fecha_hora', desdeISO).lte('fecha_hora', hastaISO)
+        .order('fecha_hora', {ascending:true}).order('id', {ascending:true})),
+      traerTodo(()=> supabaseClient.from('movimientos_inventario').select('*').eq('negocio_id', negocioId).gte('fecha_hora', desdeISO).lte('fecha_hora', hastaISO)
+        .order('fecha_hora', {ascending:true}).order('id', {ascending:true})),
       supabaseClient.from('inventario_snapshot').select('*').eq('negocio_id', negocioId).maybeSingle()
     ]);
     if(e1 || e2){ output.innerHTML = '<p class="error-text">No se pudo generar el reporte.</p>'; return; }
