@@ -165,7 +165,23 @@
   @media (max-width:880px){ .vender-grid{ grid-template-columns:1fr; } .cart-panel{ position:static; } }
   .catalog-toolbar{ margin-bottom:16px; }
   .input-search{ width:100%; padding:11px 14px; border:1px solid var(--line); border-radius:var(--radius-sm); font-size:.95rem; background:var(--surface); color:var(--ink); }
-  .chips{ display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .chips-wrap{ display:flex; align-items:flex-start; gap:8px; margin-top:12px; }
+  .chips{ display:flex; gap:8px; flex-wrap:wrap; flex:1; min-width:0; max-height:36px; overflow:hidden; }
+  .chips.abierto{ max-height:none; }
+  .chips-toggle{ flex:none; width:34px; height:34px; border-radius:50%; border:1px solid var(--line); background:var(--surface); color:var(--ink-soft); font-size:1rem; line-height:1; cursor:pointer; }
+  .chips-toggle.abierto{ transform:rotate(180deg); }
+  .tab-item[hidden]{ display:none !important; }
+  #estadoPrivacidad[data-estado="listo"]{ color:var(--green-600); }
+  #estadoPrivacidad[data-estado="sin_funcion"]{ color:var(--ink-soft); }
+  #estadoPrivacidad[data-estado="bloqueado"], #estadoPrivacidad[data-estado="no_llega"]{ color:var(--red); font-weight:700; }
+  .modal.modal-ancho{ max-width:900px; }
+  .compra-cabecera{ display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; }
+  .compra-linea{ display:grid; grid-template-columns:minmax(180px,2.2fr) repeat(3,minmax(90px,1fr)) auto; gap:8px; align-items:end; padding:10px; border:1px solid var(--line); border-radius:var(--radius-md); margin-bottom:8px; background:var(--surface-alt); }
+  .compra-linea label{ font-size:.72rem; font-weight:600; color:var(--ink-soft); display:flex; flex-direction:column; gap:3px; }
+  .compra-linea .compra-desc{ grid-column:1 / -1; font-size:.82rem; font-weight:600; }
+  .compra-linea .compra-nuevo{ grid-column:1 / -1; display:grid; grid-template-columns:2fr 1fr 1fr; gap:8px; }
+  .compra-quitar{ border:none; background:transparent; color:var(--red); font-size:1.3rem; cursor:pointer; padding:0 6px; }
+  @media (max-width:640px){ .compra-linea{ grid-template-columns:1fr 1fr; } .compra-linea .compra-nuevo{ grid-template-columns:1fr; } }
   .chip{ padding:6px 14px; border-radius:999px; border:1px solid var(--line); background:var(--surface); color:var(--ink-soft); font-size:.82rem; font-weight:600; cursor:pointer; }
   .chip.active{ background:var(--green-600); border-color:var(--green-600); color:#fff; }
 
@@ -392,6 +408,14 @@
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><circle cx="12" cy="14.5" r="2"/></svg>
             <span>Caja</span>
           </button>
+          <button type="button" class="tab-item" data-action="switch-tab" data-tab="compras" role="tab" aria-selected="false" hidden>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg>
+            <span>Compras</span>
+          </button>
+          <button type="button" class="tab-item" data-action="switch-tab" data-tab="servicios" role="tab" aria-selected="false" hidden>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.1-.6-.6-2.1z"/></svg>
+            <span>Servicios</span>
+          </button>
           <button type="button" class="tab-item" data-action="switch-tab" data-tab="administracion" role="tab" aria-selected="false">
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z"/><path d="M9.5 12l1.8 1.8L14.5 10"/></svg>
             <span>Administración</span>
@@ -415,7 +439,10 @@
         <div class="vender-catalog">
           <div class="catalog-toolbar">
             <input id="venderSearchInput" type="search" class="input-search" placeholder="Buscar producto por nombre o SKU…" />
-            <div id="categoryChips" class="chips"></div>
+            <div class="chips-wrap">
+              <div id="categoryChips" class="chips"></div>
+              <button type="button" id="chipsToggle" class="chips-toggle" data-action="toggle-categorias" aria-label="Ver todas las categorías" aria-expanded="false" style="display:none;">⌄</button>
+            </div>
           </div>
           <div id="productGrid" class="product-grid"></div>
         </div>
@@ -502,6 +529,48 @@
     </section>
 
     <!-- ADMINISTRACIÓN -->
+    <section id="panel-compras" class="panel" role="tabpanel">
+      <div class="panel-header">
+        <div>
+          <h2>Compras por factura</h2>
+          <p class="panel-subtitle">Registra la mercancía que llega con cada factura y búscala después por factura.</p>
+        </div>
+        <div class="panel-actions">
+          <button type="button" class="btn-secondary" data-action="compras-xml">Cargar XML</button>
+          <button type="button" class="btn-primary" data-action="compras-nueva">Nueva factura</button>
+        </div>
+      </div>
+      <input type="file" id="comprasXmlInput" accept=".xml,text/xml,application/xml" style="display:none;" />
+      <div class="inventario-buscador">
+        <input id="comprasBuscarInput" type="search" class="input-search" placeholder="Buscar por factura, proveedor o producto…" aria-label="Buscar facturas" />
+      </div>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Fecha</th><th>Factura</th><th>Proveedor</th><th class="num">Productos</th><th class="num">Total sin IVA</th><th></th></tr></thead>
+          <tbody id="comprasTableBody"></tbody>
+        </table>
+      </div>
+      <div id="comprasMoreWrap" class="inventario-pie"></div>
+    </section>
+
+    <section id="panel-servicios" class="panel" role="tabpanel">
+      <div class="panel-header">
+        <div>
+          <h2>Servicios</h2>
+          <p class="panel-subtitle">Servicios con sus materiales (se descuentan del inventario al venderlos) y su mano de obra.</p>
+        </div>
+        <div class="panel-actions">
+          <button type="button" class="btn-primary" data-action="servicio-nuevo">Nuevo servicio</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead><tr><th>Servicio</th><th class="num">Precio</th><th>Materiales</th><th class="num">Mano de obra</th><th class="num">Costo</th><th class="num">Ganancia</th><th></th></tr></thead>
+          <tbody id="serviciosTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section id="panel-administracion" class="panel" role="tabpanel">
       <div class="panel-header">
         <div>
@@ -509,6 +578,7 @@
           <p class="panel-subtitle">Solo para el dueño del negocio: crea cajeros y controla el acceso con tu PIN.</p>
         </div>
         <span id="syncPill" class="sync-pill" style="display:none;"></span>
+      <span id="estadoPrivacidad" style="display:none; font-size:.78rem; margin-top:6px;"></span>
       </div>
       <div id="adminArea"></div>
     </section>
@@ -540,7 +610,9 @@
       negocioDireccion:'', negocioTelefono:'', negocioLogoUrl:'', mostrarDatosTicket:false, colorPrimario:'', facturacionHabilitada:false, adminPin:'',
       turnoActual:null, cajeros:[], cuentasBancarias:[],
       pinIntentosFallidos:0, pinBloqueadoHasta:0, licenciaCodigo:'',
-      pendingVentas:[], pendingMovimientos:[], pendingCancelaciones:[], snapshotDirty:false
+      pendingVentas:[], pendingMovimientos:[], pendingCancelaciones:[], snapshotDirty:false,
+      modulos:{}, servicios:[], compras:[], gastosCaja:[], pendingGastos:[], pendingCompras:[], relacionesXml:{},
+      ventasDesde:'', pendingErrores:[]
     };
   }
   function loadState(){
@@ -589,8 +661,25 @@
   const SUPABASE_ANON_KEY = 'sb_publishable_c9LODHYI87bNwTi2XaYKDw_dzvIKV2o';
 
   const cloudEnabled = SUPABASE_URL.indexOf('http') === 0 && SUPABASE_ANON_KEY.length > 10;
+  // ---------- Privacidad entre clientes: cada petición a Supabase dice a qué negocio pertenece ----------
+  // El encabezado solo se manda si una comprobación previa confirmó que el navegador lo acepta
+  // (así, si algo no es compatible, el POS sigue funcionando como siempre).
+  const CLAVE_ENCABEZADO = 'oramEncabezado';
+  let sondeoEncabezadoId = null;                // solo mientras se hace la comprobación
+  function idParaEncabezado(){ try{ return state.negocioId || null; }catch(e){ return null; } }
+  function encabezadoPermitido(){ try{ return localStorage.getItem(CLAVE_ENCABEZADO) === 'ok'; }catch(e){ return false; } }
+  function fetchConEncabezado(url, opciones){
+    opciones = opciones || {};
+    const id = sondeoEncabezadoId || (encabezadoPermitido() ? idParaEncabezado() : null);
+    if(id && String(url).indexOf(SUPABASE_URL) === 0){
+      const h = new Headers(opciones.headers || {});
+      h.set('x-negocio-id', id);
+      opciones = Object.assign({}, opciones, { headers: h });
+    }
+    return window.fetch(url, opciones);
+  }
   const supabaseClient = (cloudEnabled && window.supabase)
-    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { global:{ fetch: fetchConEncabezado } })
     : null;
 
   // ---------- Vínculo con un negocio (código) ----------
@@ -635,11 +724,7 @@
     if(!codigo){ return; }
     errorEl.style.display = 'none';
     try{
-      const { data, error } = await supabaseClient
-        .from('negocios_estatus_publico')
-        .select('id, codigo, estatus, nombre_negocio, direccion, telefono, logo_url, mostrar_datos_ticket, color_primario, facturacion_habilitada, admin_pin, cuentas_bancarias')
-        .ilike('codigo', codigo)
-        .maybeSingle();
+      const { data, error } = await buscarNegocioPorCodigo(codigo, 'id, codigo, estatus, nombre_negocio, direccion, telefono, logo_url, mostrar_datos_ticket, color_primario, facturacion_habilitada, admin_pin, cuentas_bancarias');
       if(error){
         errorEl.textContent = 'Error al buscar: ' + (error.message || error.code || JSON.stringify(error));
         errorEl.style.display = 'block';
@@ -664,6 +749,11 @@
         state.turnoActual = null;
         state.cajeros = [];
         state.licenciaCodigo = '';
+        state.modulos = {}; state.servicios = []; state.compras = []; state.gastosCaja = [];
+        state.pendingGastos = []; state.pendingCompras = []; state.relacionesXml = {};
+        state.ventasDesde = ''; state.pendingErrores = [];
+        ventasNubeDia = {}; ventasNubePorId = {}; folioNubeCache = {};
+        ultimaCargaModulos = 0;
         detenerPollEscaneos();
       }
 
@@ -680,6 +770,7 @@
       state.cuentasBancarias = Array.isArray(data.cuentas_bancarias) ? data.cuentas_bancarias : [];
       if(data.nombre_negocio){ state.businessName = data.nombre_negocio; }
       saveState();
+      await probarEncabezado();     // comprueba que el encabezado del negocio funciona antes de seguir
 
       if(data.estatus === 'suspendido'){
         renderSuspendedScreen();
@@ -763,25 +854,29 @@
       }catch(e){ /* si falla la recuperación, continúa con catálogo vacío */ }
 
       try{
-        const { data: ventasCloud } = await supabaseClient
+        const corte = corteVentasLocales();
+        const { data: ventasCloud } = await traerTodo(()=> supabaseClient
           .from('ventas')
           .select('*')
           .eq('negocio_id', negocioId)
-          .order('fecha_hora', {ascending:true});
-        if(ventasCloud && ventasCloud.length){
-          state.sales = ventasCloud.map(v=>({
-            id: v.id, folio: v.folio, dateISO: v.fecha_hora,
-            items: v.items, total: Number(v.total), method: v.metodo,
-            received: v.recibido!==null ? Number(v.recibido) : null,
-            change: v.cambio!==null ? Number(v.cambio) : null,
-            requiereFactura: !!v.requiere_factura, datosFiscales: v.datos_fiscales || null,
-            pagoMixto: v.pago_mixto || null, turnoId: v.turno_id || null
-          }));
+          .gte('fecha_hora', corte.iso)
+          .order('fecha_hora', {ascending:true})
+          .order('id', {ascending:true}));
+        if(ventasCloud){
+          state.sales = ventasCloud.map(v=> ventaDeNube(v, false));
+          state.ventasDesde = corte.dia;           // este equipo cubre desde aquí; lo anterior se consulta en la nube
           let maxFolio = 0;
           state.sales.forEach(s=>{
             const m = /V-(\d+)/.exec(s.folio || '');
             if(m){ maxFolio = Math.max(maxFolio, parseInt(m[1],10)); }
           });
+          if(!state.sales.length){
+            // sin ventas recientes: el folio sigue de la última venta que exista
+            const { data: ultima } = await supabaseClient.from('ventas').select('folio').eq('negocio_id', negocioId)
+              .order('fecha_hora', {ascending:false}).limit(1);
+            const m = /V-(\d+)/.exec(((ultima && ultima[0]) || {}).folio || '');
+            if(m) maxFolio = parseInt(m[1], 10);
+          }
           state.nextFolio = maxFolio + 1;
           saveState();
         }
@@ -861,6 +956,7 @@
       aplicarColorMarca(state.colorPrimario);
       renderCatalogCover();
       renderCartSummary();
+      cargarModulos(false);
       if(data.estatus === 'suspendido'){
         renderSuspendedScreen();
       }else if(wasSuspended){
@@ -893,6 +989,13 @@
     if(!pill || !cloudEnabled) return;
     const pending = state.pendingVentas.length + state.pendingMovimientos.length + (state.snapshotDirty?1:0);
     pill.style.display = 'inline-flex';
+    if((state.pendingErrores||[]).length){
+      pill.className = 'sync-pill offline'; pill.style.cursor = 'pointer';
+      pill.setAttribute('data-action', 'ver-errores-sync');
+      pill.textContent = '⚠ ' + state.pendingErrores.length + ' sin enviar (toca para ver)';
+      return;
+    }
+    pill.setAttribute('data-action', 'ver-estado-sistema'); pill.style.cursor = 'pointer';
     if(!navigator.onLine){ pill.className = 'sync-pill offline'; pill.textContent = '☁ Sin conexión'; }
     else if(pending>0){ pill.className = 'sync-pill pending'; pill.textContent = `☁ Sincronizando… (${pending})`; }
     else{ pill.className = 'sync-pill'; pill.textContent = '☁ Respaldado'; }
@@ -916,14 +1019,19 @@
     flushSync();
   }
   let flushing = false;
+  let repetirFlush = false;
   async function flushSync(){
-    if(!cloudEnabled || !state.negocioId || flushing) { updateSyncPill(); return; }
+    if(!cloudEnabled || !state.negocioId) { updateSyncPill(); return; }
+    // Si llega algo nuevo mientras ya se está sincronizando, se repite la ronda al terminar
+    // (antes esperaba hasta la siguiente ronda de 30 segundos).
+    if(flushing){ repetirFlush = true; updateSyncPill(); return; }
     if(!navigator.onLine){ updateSyncPill(); return; }
     flushing = true;
     try{
       while(state.pendingVentas.length){
         const v = state.pendingVentas[0];
         const { error } = await supabaseClient.from('ventas').insert({
+          ...(esUuid(v.id) ? { id: v.id } : {}),
           negocio_id: state.negocioId, folio: v.folio, fecha_hora: v.dateISO,
           items: v.items, total: v.total, metodo: v.method, recibido: v.received, cambio: v.change,
           requiere_factura: !!v.requiereFactura, datos_fiscales: v.datosFiscales || null,
@@ -931,7 +1039,7 @@
           descuento_pct: v.descuentoPct || 0, subtotal_antes_descuento: v.subtotalAntesDescuento || v.total,
           cancelada: !!v.cancelada, cuenta_transferencia: v.cuentaTransferencia || null
         });
-        if(error) break;
+        if(error && !resolverErrorSync('venta', v, error)) break;
         state.pendingVentas.shift();
         saveState();
       }
@@ -941,28 +1049,49 @@
           negocio_id: state.negocioId, producto_id: m.producto_id, producto_nombre: m.producto_nombre,
           cantidad: m.cantidad, costo_unitario: m.costo_unitario
         });
-        if(error) break;
+        if(error && !resolverErrorSync('movimiento', m, error)) break;
         state.pendingMovimientos.shift();
+        saveState();
+      }
+      while((state.pendingGastos||[]).length){
+        const g = state.pendingGastos[0];
+        const { error } = await supabaseClient.from('gastos_caja').insert({
+          negocio_id: state.negocioId, turno_id: g.turnoId || null, cajero: g.cajero || null,
+          concepto: g.concepto, monto: g.monto, fecha_hora: g.fechaISO
+        });
+        if(error && !resolverErrorSync('gasto', g, error)) break;
+        state.pendingGastos.shift();
+        saveState();
+      }
+      while((state.pendingCompras||[]).length){
+        const c = state.pendingCompras[0];
+        const { error } = await supabaseClient.from('compras_factura').insert({
+          negocio_id: state.negocioId, numero: c.numero, proveedor: c.proveedor || null, fecha: c.fecha,
+          uuid_fiscal: c.uuid || null, items: c.items, total: c.total
+        });
+        if(error && !resolverErrorSync('compra', c, error)) break;     // 23505 = ya estaba en la nube
+        state.pendingCompras.shift();
         saveState();
       }
       while(state.pendingCancelaciones.length){
         const c = state.pendingCancelaciones[0];
         const { error } = await supabaseClient.from('ventas').update({
           cancelada: true, cancelada_por: c.cancelada_por, cancelada_en: c.cancelada_en, motivo_cancelacion: c.motivo || null
-        }).eq('negocio_id', state.negocioId).eq('folio', c.folio);
+        }).eq('negocio_id', state.negocioId).eq(esUuid(c.id) ? 'id' : 'folio', esUuid(c.id) ? c.id : c.folio);
         if(error) break;
         state.pendingCancelaciones.shift();
         saveState();
       }
       if(state.snapshotDirty){
-        const { error } = await supabaseClient.from('inventario_snapshot').upsert({
-          negocio_id: state.negocioId, productos: state.products, updated_at: new Date().toISOString()
-        });
+        const cargaRespaldo = { negocio_id: state.negocioId, productos: state.products, updated_at: new Date().toISOString() };
+        if(moduloActivo('servicios')) cargaRespaldo.extras = { servicios: state.servicios || [] };
+        const { error } = await supabaseClient.from('inventario_snapshot').upsert(cargaRespaldo);
         if(!error){ state.snapshotDirty = false; saveState(); }
       }
     }catch(e){ /* sin conexión: se reintentará después */ }
     flushing = false;
     updateSyncPill();
+    if(repetirFlush){ repetirFlush = false; flushSync(); }
   }
   window.addEventListener('online', flushSync);
   window.addEventListener('online', updateSyncPill);
@@ -1114,6 +1243,285 @@
     return false;
   }
 
+  // ---------- Utilidades: decimales, módulos por cliente y lectura por tandas ----------
+  function r3(n){ return Math.round((Number(n)||0)*1000)/1000; }
+  function r2(n){ return Math.round((Number(n)||0)*100)/100; }
+  function formatCantidad(n){ return String(r3(n)); }
+
+  // Los módulos (Servicios, Gastos de caja, Compras por factura) los activa el dueño del sistema
+  // por cliente desde el panel. Sin activar, el POS se ve y funciona exactamente como siempre.
+  const MODULOS_RECARGA_MS = 10*60*1000;
+  let ultimaCargaModulos = 0;
+  let modulosNoDisponibles = false;
+  function moduloActivo(nombre){ return !!(state.modulos && state.modulos[nombre]); }
+  // Consulta aparte (no se mezcla con la carga del negocio): si la columna todavía no existe en
+  // Supabase, falla en silencio y los módulos simplemente quedan apagados.
+  async function cargarModulos(forzar){
+    if(!cloudEnabled || !state.negocioId || modulosNoDisponibles) return;
+    if(!forzar && Date.now() - ultimaCargaModulos < MODULOS_RECARGA_MS) return;
+    ultimaCargaModulos = Date.now();
+    try{
+      const { data, error } = await supabaseClient.from('negocios_estatus_publico').select('modulos').eq('id', state.negocioId).maybeSingle();
+      if(error){
+        if(/modulos|column|42703/i.test(String(error.message||'') + String(error.code||''))) modulosNoDisponibles = true;
+        return;
+      }
+      const nuevos = (data && data.modulos && typeof data.modulos === 'object') ? data.modulos : {};
+      if(JSON.stringify(nuevos) !== JSON.stringify(state.modulos || {})){
+        state.modulos = nuevos;
+        saveState();
+        aplicarModulos();
+      }
+    }catch(e){ /* sin conexión: se queda con lo último que se sabía */ }
+  }
+  function aplicarModulos(){
+    const visibles = { servicios: moduloActivo('servicios'), compras: moduloActivo('compras') };
+    Object.keys(visibles).forEach(m=>{
+      document.querySelectorAll('.tab-item[data-tab="' + m + '"]').forEach(b=>{ b.hidden = !visibles[m]; });
+    });
+    const activa = document.querySelector('.tab-item.active');
+    if(activa && activa.dataset.tab && visibles[activa.dataset.tab] === false) switchTab('vender');
+    if(typeof renderCategoryChips === 'function') renderCategoryChips();
+    if(typeof renderVenderGrid === 'function') renderVenderGrid();
+    if(typeof renderTurnoEstado === 'function') renderTurnoEstado();
+    if(visibles.servicios && typeof renderServicios === 'function') renderServicios();
+    if(visibles.compras && typeof renderCompras === 'function') renderCompras();
+  }
+  function iniciarModulos(){
+    aplicarModulos();
+    cargarModulos(true).then(()=>{
+      if(typeof restaurarGastosTurno === 'function') restaurarGastosTurno();
+      if(typeof restaurarCompras === 'function') restaurarCompras();
+      if(typeof restaurarServicios === 'function') restaurarServicios();
+    });
+  }
+  // Supabase entrega máximo 1,000 filas por consulta. Esto pide por tandas hasta traer todas.
+  async function traerTodo(armar, tam){
+    tam = tam || 1000;
+    let todo = [], desde = 0;
+    for(let pagina=0; pagina<500; pagina++){
+      const { data, error } = await armar().range(desde, desde + tam - 1);
+      if(error) return { data: null, error };
+      const filas = data || [];
+      if(!filas.length) break;
+      todo = todo.concat(filas);
+      desde += filas.length;
+    }
+    return { data: todo, error: null };
+  }
+
+  // ---------- Ventas en el equipo: solo los últimos 60 días (lo demás se consulta en la nube) ----------
+  // El navegador guarda todo el POS en un espacio de ~5 MB y las ventas nunca se borraban: con los meses se llenaba.
+  // Cada venta ya está en Supabase desde que se hace; aquí solo se recorta la copia del equipo.
+  const VENTAS_LOCALES_DIAS = 60;
+  const VENTAS_LOCALES_PRESUPUESTO = 2500000;   // caracteres (~2.5 MB): tope extra por si hay muchísimas ventas
+  let ventasNubeDia = {}, ventasNubePorId = {}, ventasNubeCargando = {}, folioNubeCache = {}, folioNubeTimer = null;
+  function sumarDias(dateStr, n){
+    const d = new Date(dateStr + 'T00:00:00');
+    d.setDate(d.getDate() + n);
+    return toDateInputValue(d);
+  }
+  function corteVentasLocales(){
+    const dia = sumarDias(todayStr(), -VENTAS_LOCALES_DIAS);
+    return { dia, iso: new Date(dia + 'T00:00:00').toISOString() };
+  }
+  // ¿Este día completo está en la copia del equipo? (si no, hay que consultarlo en la nube)
+  function diaCubiertoLocal(dateStr){ return !state.ventasDesde || dateStr >= state.ventasDesde; }
+  function podarVentasLocales(){
+    if(!Array.isArray(state.sales) || !state.sales.length) return;
+    const corte = corteVentasLocales();
+    // Nunca se quita una venta que todavía no se ha enviado a la nube
+    const pendientes = new Set((state.pendingVentas||[]).map(v=> v.id));
+    let conservar = state.sales.filter(s=> dateStrFromISO(s.dateISO) >= corte.dia || pendientes.has(s.id));
+    let corteDia = corte.dia;
+    // Tope por tamaño: de las más nuevas hacia atrás, hasta llenar el presupuesto
+    let usado = 0, desdeIdx = conservar.length;
+    for(let i = conservar.length - 1; i >= 0; i--){
+      const tam = JSON.stringify(conservar[i]).length;
+      if(usado + tam > VENTAS_LOCALES_PRESUPUESTO && !pendientes.has(conservar[i].id)) break;
+      usado += tam; desdeIdx = i;
+    }
+    if(desdeIdx > 0){
+      // se recortó por tamaño: el día parcial se descarta completo para no mostrar un día a medias
+      corteDia = sumarDias(dateStrFromISO(conservar[desdeIdx].dateISO), 1);
+      conservar = conservar.slice(desdeIdx).filter(s=> dateStrFromISO(s.dateISO) >= corteDia || pendientes.has(s.id));
+    }
+    if(conservar.length === state.sales.length) return;       // no se quitó nada
+    state.sales = conservar;
+    if(!state.ventasDesde || corteDia > state.ventasDesde) state.ventasDesde = corteDia;
+    saveState();
+  }
+  function ventaDeNube(v, soloLectura){
+    const s = {
+      id: v.id, folio: v.folio, dateISO: v.fecha_hora,
+      items: v.items || [], total: Number(v.total), method: v.metodo,
+      received: v.recibido != null ? Number(v.recibido) : null,
+      change: v.cambio != null ? Number(v.cambio) : null,
+      requiereFactura: !!v.requiere_factura, datosFiscales: v.datos_fiscales || null,
+      pagoMixto: v.pago_mixto || null, turnoId: v.turno_id || null, cancelada: !!v.cancelada,
+      cuentaTransferencia: v.cuenta_transferencia || null, descuentoPct: Number(v.descuento_pct) || 0
+    };
+    if(v.subtotal_antes_descuento != null) s.subtotalAntesDescuento = Number(v.subtotal_antes_descuento);
+    if(soloLectura) s.soloLectura = true;
+    return s;
+  }
+  async function ventasDeNubePorRango(desdeISO, hastaISO){
+    if(!cloudEnabled || !state.negocioId || !navigator.onLine) return null;
+    try{
+      const { data, error } = await traerTodo(()=> supabaseClient.from('ventas').select('*').eq('negocio_id', state.negocioId)
+        .gte('fecha_hora', desdeISO).lte('fecha_hora', hastaISO)
+        .order('fecha_hora', {ascending:true}).order('id', {ascending:true}));
+      if(error || !data) return null;
+      return data.map(v=>{ const s = ventaDeNube(v, true); ventasNubePorId[s.id] = s; return s; });
+    }catch(e){ return null; }
+  }
+  async function cargarVentasViejasDia(dateStr){
+    if(ventasNubeCargando[dateStr]) return;
+    ventasNubeCargando[dateStr] = true;
+    const desde = new Date(dateStr + 'T00:00:00'), hasta = new Date(dateStr + 'T23:59:59.999');
+    const res = await ventasDeNubePorRango(desde.toISOString(), hasta.toISOString());
+    ventasNubeDia[dateStr] = res;            // lista, o null si no se pudo consultar
+    delete ventasNubeCargando[dateStr];
+    if(ventasDate === dateStr) renderVentas();
+  }
+  function buscarVenta(id){
+    return state.sales.find(s=> s.id === id) || ventasNubePorId[id] || null;
+  }
+  function buscarFolioEnNube(q){
+    if(!state.ventasDesde || !cloudEnabled || !state.negocioId || !navigator.onLine || q.length < 3) return;
+    if(folioNubeCache[q] !== undefined) return;
+    clearTimeout(folioNubeTimer);
+    folioNubeTimer = setTimeout(async ()=>{
+      const limite = new Date(state.ventasDesde + 'T00:00:00').toISOString();
+      try{
+        const { data, error } = await supabaseClient.from('ventas').select('*').eq('negocio_id', state.negocioId)
+          .ilike('folio', '%' + q.replace(/[%_]/g, '') + '%').lt('fecha_hora', limite).order('fecha_hora', {ascending:false}).limit(30);
+        folioNubeCache[q] = error ? [] : (data||[]).map(v=>{ const s = ventaDeNube(v, true); ventasNubePorId[s.id] = s; return s; });
+      }catch(e){ folioNubeCache[q] = []; }
+      const input = document.getElementById('folioSearchInput');
+      if(input && input.value.trim().toLowerCase() === q) renderFolioSearch(input.value);
+    }, 350);
+  }
+
+  // ---------- Identificador único de cada venta y errores de envío ----------
+  function esUuid(x){ return typeof x === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x); }
+  function idUnico(){
+    if(window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c=>{ const r = Math.random()*16|0; return (c === 'x' ? r : (r&0x3|0x8)).toString(16); });
+  }
+  // Un registro con datos que la nube rechaza (códigos 22xxx / 23xxx) se aparta para que NO frene a los demás.
+  // Un error de conexión (u otro) detiene la ronda y se reintenta después. Un duplicado (23505) ya estaba en la nube.
+  function resolverErrorSync(tipo, dato, error){
+    const codigo = String((error && error.code) || '');
+    if(codigo === '23505') return true;
+    if(/^(22|23)/.test(codigo)){
+      state.pendingErrores.push({ tipo, folio: dato.folio || dato.numero || dato.concepto || dato.producto_nombre || '', mensaje: String(error.message || codigo), dato, fechaISO: new Date().toISOString() });
+      saveState();
+      showToast('Un registro no se pudo enviar a la nube y se apartó para que no detenga lo demás. Revisa Administración.', 'error');
+      return true;
+    }
+    return false;
+  }
+  function abrirErroresSync(){
+    const lista = state.pendingErrores || [];
+    if(!lista.length) return;
+    openModal('Registros que no se pudieron enviar', `
+      <p style="font-size:.88rem; margin:0 0 10px;">Estos registros se guardaron en este equipo, pero la nube los rechazó. El resto de las ventas sigue enviándose normal. Avisa a soporte con este detalle.</p>
+      <div class="table-scroll"><table class="data-table">
+        <thead><tr><th>Tipo</th><th>Referencia</th><th>Motivo</th></tr></thead>
+        <tbody>${lista.map(e=>`<tr><td>${escapeHTML(e.tipo)}</td><td class="mono">${escapeHTML(String(e.folio||''))}</td><td style="font-size:.8rem;">${escapeHTML(e.mensaje)}</td></tr>`).join('')}</tbody>
+      </table></div>`, `
+      <button type="button" class="btn-ghost" data-action="close-modal">Cerrar</button>
+      <button type="button" class="btn-primary" data-action="reintentar-errores-sync">Reintentar envío</button>`);
+  }
+  function reintentarErroresSync(){
+    const cola = { venta:'pendingVentas', movimiento:'pendingMovimientos', gasto:'pendingGastos', compra:'pendingCompras' };
+    (state.pendingErrores||[]).forEach(e=>{ if(cola[e.tipo]) state[cola[e.tipo]].push(e.dato); });
+    state.pendingErrores = [];
+    saveState();
+    closeModal();
+    flushSync();
+    updateSyncPill();
+  }
+
+  // ---------- Comprobación del encabezado de seguridad y entrada con código ----------
+  let estadoPrivacidad = 'desconocido';
+  async function probarEncabezado(){
+    const id = idParaEncabezado();
+    if(!cloudEnabled || !id || !navigator.onLine) return estadoPrivacidad;
+    sondeoEncabezadoId = id;
+    let r;
+    try{ r = await supabaseClient.rpc('negocio_de_la_peticion'); }
+    catch(e){ r = { data:null, error:{ message:'TypeError: Failed to fetch' } }; }
+    finally{ sondeoEncabezadoId = null; }
+    let resultado;
+    if(r && r.error){
+      const msg = String(r.error.message || '') + ' ' + String(r.error.code || '');
+      resultado = /PGRST202|42883|Could not find the function/i.test(msg) ? 'sin_funcion' : 'bloqueado';
+    }else{
+      resultado = (r && r.data === id) ? 'listo' : 'no_llega';
+    }
+    // Solo se recuerda el éxito: un fallo pasajero (sin internet, etc.) no apaga lo que ya funcionaba
+    if(resultado === 'listo' || resultado === 'sin_funcion'){ try{ localStorage.setItem(CLAVE_ENCABEZADO, 'ok'); }catch(e){} }
+    estadoPrivacidad = resultado;
+    renderEstadoPrivacidad();
+    return resultado;
+  }
+  const TEXTOS_PRIVACIDAD = {
+    listo: '🔒 Lista en este equipo',
+    sin_funcion: 'Falta correr privacidad_1_preparar.sql en Supabase',
+    bloqueado: '⚠ El navegador no aceptó el encabezado de seguridad: NO actives el paso 2 de privacidad',
+    no_llega: '⚠ Supabase no recibió el encabezado de seguridad: NO actives el paso 2 de privacidad',
+    desconocido: 'Aún no comprobada (se comprueba al abrir con internet)'
+  };
+  // Solo se muestra una línea visible cuando hay un PROBLEMA. Lo normal queda oculto (se consulta en "Estado del sistema").
+  function renderEstadoPrivacidad(){
+    const el = document.getElementById('estadoPrivacidad');
+    if(!el) return;
+    if(estadoPrivacidad === 'bloqueado' || estadoPrivacidad === 'no_llega'){
+      el.style.display = 'block';
+      el.textContent = TEXTOS_PRIVACIDAD[estadoPrivacidad];
+      el.dataset.estado = estadoPrivacidad;
+    }else{
+      el.style.display = 'none';
+    }
+  }
+  function abrirEstadoSistema(){
+    const pend = state.pendingVentas.length + state.pendingMovimientos.length + (state.snapshotDirty ? 1 : 0);
+    const respaldo = !navigator.onLine ? 'Sin conexión' : (pend > 0 ? 'Sincronizando (' + pend + ')' : 'Respaldado');
+    openModal('Estado del sistema', `
+      <div style="display:grid; gap:10px; font-size:.9rem;">
+        <p style="margin:0;"><b>Respaldo en la nube:</b> ${respaldo}</p>
+        <p style="margin:0;"><b>Seguridad entre clientes:</b> <span id="estadoSeguridadTexto">${escapeHTML(TEXTOS_PRIVACIDAD[estadoPrivacidad] || TEXTOS_PRIVACIDAD.desconocido)}</span></p>
+        <p style="margin:0;"><b>Ventas guardadas en este equipo:</b> ${state.ventasDesde ? 'desde el ' + escapeHTML(state.ventasDesde) : 'todo el historial'}</p>
+        <p style="margin:0;"><b>Versión del POS:</b> ${escapeHTML(VERSION_APP)}</p>
+      </div>`, `
+      <button type="button" class="btn-ghost" data-action="comprobar-seguridad">Comprobar ahora</button>
+      <button type="button" class="btn-primary" data-action="close-modal">Cerrar</button>`);
+  }
+  async function comprobarSeguridadAhora(){
+    const el = document.getElementById('estadoSeguridadTexto');
+    if(el) el.textContent = 'Comprobando…';
+    await probarEncabezado();
+    const el2 = document.getElementById('estadoSeguridadTexto');
+    if(el2) el2.textContent = TEXTOS_PRIVACIDAD[estadoPrivacidad] || TEXTOS_PRIVACIDAD.desconocido;
+  }
+  // Entrar con el código del negocio: primero con la función segura (devuelve SOLO ese negocio);
+  // si todavía no existe en Supabase, con la consulta de siempre.
+  async function buscarNegocioPorCodigo(codigo, columnas){
+    try{
+      const { data, error } = await supabaseClient.rpc('buscar_negocio', { p_codigo: codigo });
+      if(!error){
+        if(!data) return { data: null, error: null };
+        const cols = columnas.split(',').map(c=> c.trim());
+        const filtrado = {}; cols.forEach(c=>{ filtrado[c] = data[c]; });
+        return { data: filtrado, error: null };
+      }
+      if(!/PGRST202|42883|Could not find the function/i.test(String(error.message || '') + String(error.code || ''))) return { data: null, error };
+    }catch(e){ /* sin la función: se usa la consulta de siempre */ }
+    return await supabaseClient.from('negocios_estatus_publico').select(columnas).ilike('codigo', codigo).maybeSingle();
+  }
+
   const STOCK_ILIMITADO = 999999999;
   function addProduct({name, category, sku, price, cost, stock, minStock, ilimitado, porMonto, paquetes}){
     if(bloqueadoPorSuspension()) return null;
@@ -1154,7 +1562,7 @@
     if(bloqueadoPorSuspension()) return;
     const p = state.products.find(x=>x.id===productId);
     if(!p) return;
-    p.stock += Number(qty);
+    p.stock = r3(p.stock + Number(qty));
     if(unitCost!==undefined && unitCost!=='' && !isNaN(Number(unitCost))){ p.cost = Number(unitCost); }
     saveState();
     markSnapshotDirty();
@@ -1210,15 +1618,53 @@
     if((p.paquetes||[]).length) return 'Solo paquetes';
     return formatMoney(p.price);
   }
+  function vendibleDeServicio(s){
+    return { id:s.id, tipo:'servicio', servicio:s, base:null, nombre:s.nombre, sku:'', categoria:'Servicios', precio:Number(s.precio), piezas:1 };
+  }
+  // Cuántos servicios completos alcanza a dar el material que hay en el inventario
+  function disponiblesServicio(s){
+    let minimo = Infinity;
+    (s.materiales||[]).forEach(m=>{
+      const p = state.products.find(x=> x.id === m.productId);
+      if(!p){ minimo = 0; return; }
+      if(p.ilimitado) return;
+      const cant = Number(m.cantidad) || 0;
+      if(cant <= 0) return;
+      minimo = Math.min(minimo, Math.floor(r3(p.stock / cant) + 1e-9));
+    });
+    return Math.max(0, minimo);
+  }
+  function costoServicio(s){
+    const materiales = (s.materiales||[]).reduce((sum,m)=>{
+      const p = state.products.find(x=> x.id === m.productId);
+      return sum + (p ? (Number(p.cost)||0) * (Number(m.cantidad)||0) : 0);
+    }, 0);
+    return r2(materiales + (Number(s.manoObra)||0));
+  }
+  function materialQueFalta(s, veces){
+    for(const m of (s.materiales||[])){
+      const p = state.products.find(x=> x.id === m.productId);
+      if(!p) return 'ya no existe uno de los materiales';
+      if(p.ilimitado) continue;
+      const libres = r3(p.stock - piezasEnCarrito(p.id, null));
+      if(libres + 1e-9 < r3((Number(m.cantidad)||0) * veces)) return p.name;
+    }
+    return '';
+  }
   function todosLosVendibles(){
     const lista = [];
     state.products.forEach(p=>{
       if(esVendibleSuelto(p)) lista.push(vendibleDeProducto(p));
       (p.paquetes||[]).forEach(pk=> lista.push(vendibleDePaquete(p, pk)));
     });
+    if(moduloActivo('servicios')) (state.servicios||[]).forEach(s=> lista.push(vendibleDeServicio(s)));
     return lista;
   }
   function resolverVendible(id){
+    if(moduloActivo('servicios')){
+      const sv = (state.servicios||[]).find(x=> x.id === id);
+      if(sv) return vendibleDeServicio(sv);
+    }
     for(const p of state.products){
       if(p.id===id) return esVendibleSuelto(p) ? vendibleDeProducto(p) : null;
       const pk = (p.paquetes||[]).find(x=>x.id===id);
@@ -1233,14 +1679,33 @@
   }
   // cuántas unidades de este vendible alcanzan con la existencia del producto base
   function disponiblesDeVendible(v){
+    if(v.tipo === 'servicio') return disponiblesServicio(v.servicio);
     if(v.base.ilimitado) return Infinity;
     return Math.max(0, Math.floor(v.base.stock / v.piezas));
   }
   // piezas del producto base que ya están apartadas por OTRAS líneas del carrito
   function piezasEnCarrito(baseId, exceptoKey){
-    return cart.reduce((sum,c)=> ((c.baseId||c.productId)===baseId && c.productId!==exceptoKey) ? sum + c.qty*(c.piezas||1) : sum, 0);
+    return r3(cart.reduce((sum,c)=>{
+      if(c.productId === exceptoKey) return sum;
+      if(c.esServicio){                    // un servicio aparta sus materiales
+        const m = (c.consumo||[]).find(x=> x.productId === baseId);
+        return m ? sum + m.cantidad * c.qty : sum;
+      }
+      return (c.baseId||c.productId) === baseId ? sum + c.qty*(c.piezas||1) : sum;
+    }, 0));
   }
   function maxQtyLinea(item){
+    if(item.esServicio){
+      let minimo = Infinity;
+      (item.consumo||[]).forEach(m=>{
+        const p = state.products.find(x=> x.id === m.productId);
+        if(!p){ minimo = 0; return; }
+        if(p.ilimitado) return;
+        if(!(m.cantidad > 0)) return;
+        minimo = Math.min(minimo, Math.floor(r3((p.stock - piezasEnCarrito(p.id, item.productId)) / m.cantidad) + 1e-9));
+      });
+      return Math.max(0, minimo);
+    }
     const base = state.products.find(x=>x.id===(item.baseId||item.productId));
     if(!base) return 0;
     if(base.ilimitado) return Infinity;
@@ -1251,7 +1716,7 @@
   function desgloseLinea(c){
     const partes = [];
     let restante = c.qty;
-    if(!c.esPaquete){
+    if(!c.esPaquete && !c.esServicio){
       const base = state.products.find(x=>x.id===(c.baseId||c.productId));
       if(base){
         promosActivas(base).forEach(pr=>{
@@ -1276,6 +1741,22 @@
   function addToCart(id){
     const v = resolverVendible(id);
     if(!v) return;
+    if(v.tipo === 'servicio'){
+      const s = v.servicio;
+      const existente = cart.find(c=> c.productId === id);
+      if(existente){
+        if(existente.qty < maxQtyLinea(existente)) existente.qty++;
+        else showToast('Falta material para otro servicio de ' + s.nombre + '.', 'warn');
+      }else{
+        const falta = materialQueFalta(s, 1);
+        if(falta){ showToast('Falta material para ' + s.nombre + ': ' + falta + '.', 'warn'); return; }
+        cart.push({ productId:s.id, baseId:s.id, name:s.nombre, price:Number(s.precio), cost:costoServicio(s), qty:1, piezas:1, esServicio:true,
+          consumo:(s.materiales||[]).map(m=>({ productId:m.productId, cantidad:Number(m.cantidad) })) });
+      }
+      renderCart();
+      renderVenderGrid();
+      return;
+    }
     if(v.tipo==='producto' && v.base.porMonto){ openMontoModal(v.base.id); return; }
     const existing = cart.find(c=>c.productId===id);
     if(existing){
@@ -1408,8 +1889,12 @@
     // Se suma lo que pide el carrito POR PRODUCTO BASE (un paquete descuenta varias piezas)
     const demanda = {};
     cart.forEach(item=>{
+      if(item.esServicio){
+        (item.consumo||[]).forEach(m=>{ demanda[m.productId] = r3((demanda[m.productId]||0) + m.cantidad * item.qty); });
+        return;
+      }
       const k = item.baseId || item.productId;
-      demanda[k] = (demanda[k]||0) + item.qty*(item.piezas||1);
+      demanda[k] = r3((demanda[k]||0) + item.qty*(item.piezas||1));
     });
     for(const baseId of Object.keys(demanda)){
       const p = state.products.find(x=>x.id===baseId);
@@ -1420,20 +1905,22 @@
       const p = state.products.find(x=>x.id===baseId);
       if(p.ilimitado) return;
       const antes = p.stock;
-      p.stock -= demanda[baseId];
+      p.stock = r3(p.stock - demanda[baseId]);
       if(antes > p.minStock && p.stock <= p.minStock){ productosBajoMinimo.push(p); }
     });
     const itemsVenta = [];
     cart.forEach(c=>{
       desgloseLinea(c).forEach(pt=>{
-        itemsVenta.push({ productId:(c.baseId||c.productId), name:pt.nombre, qty:pt.qty, price:pt.price, cost:pt.cost||0, piezas:pt.piezas });
+        const it = { productId:(c.baseId||c.productId), name:pt.nombre, qty:pt.qty, price:pt.price, cost:pt.cost||0, piezas:pt.piezas };
+        if(c.esServicio){ it.esServicio = true; it.consumo = c.consumo; }
+        itemsVenta.push(it);
       });
     });
     const folio = 'V-' + String(state.nextFolio).padStart(4,'0');
     const facturaSolicitada = state.facturacionHabilitada && quiereFactura;
     const huboTransferencia = selectedMethod==='transferencia' || (selectedMethod==='mixto' && Number(pagoMixtoDraft.transferencia)>0);
     state.sales.push({
-      id: uid('s_'), folio, dateISO: new Date().toISOString(),
+      id: idUnico(), folio, dateISO: new Date().toISOString(),
       items: itemsVenta,
       total, subtotalAntesDescuento: subtotal, descuentoPct: Number(descuentoPct)||0,
       method:selectedMethod, received, change, pagoMixto,
@@ -1461,12 +1948,36 @@
   }
 
   // ---------- Rendering: Vender ----------
+  let categoriasAbiertas = false;
   function renderCategoryChips(){
     const el = document.getElementById('categoryChips');
-    const cats = Array.from(new Set(state.products.map(p=>p.category))).sort();
-    const all = ['Todas', ...cats];
+    if(!el) return;
+    let cats = Array.from(new Set(state.products.map(p=>p.category))).sort();
+    if(moduloActivo('servicios') && (state.servicios||[]).length && !cats.includes('Servicios')) cats.push('Servicios');
+    // La categoría elegida va justo después de "Todas" para que siempre se vea cuál filtro está activo
+    const resto = cats.filter(c=> c !== activeCategory);
+    const all = ['Todas', ...(activeCategory !== 'Todas' ? [activeCategory] : []), ...resto];
     el.innerHTML = all.map(c=>`<button type="button" class="chip ${activeCategory===c?'active':''}" data-action="category-chip" data-cat="${escapeHTML(c)}">${escapeHTML(c)}</button>`).join('');
+    el.classList.toggle('abierto', categoriasAbiertas);
+    actualizarFlechaCategorias();
   }
+  // La flecha solo aparece si las categorías no caben en una sola línea
+  function actualizarFlechaCategorias(){
+    const el = document.getElementById('categoryChips');
+    const btn = document.getElementById('chipsToggle');
+    if(!el || !btn) return;
+    const desborda = el.scrollHeight > 44;
+    btn.style.display = (desborda || categoriasAbiertas) ? '' : 'none';
+    btn.classList.toggle('abierto', categoriasAbiertas);
+    btn.setAttribute('aria-expanded', categoriasAbiertas ? 'true' : 'false');
+  }
+  function alternarCategorias(){
+    categoriasAbiertas = !categoriasAbiertas;
+    const el = document.getElementById('categoryChips');
+    if(el) el.classList.toggle('abierto', categoriasAbiertas);
+    actualizarFlechaCategorias();
+  }
+  window.addEventListener('resize', ()=>{ actualizarFlechaCategorias(); });
   function setCategory(cat){ activeCategory = cat; renderVenderGrid(); }
 
   function renderVenderGrid(){
@@ -1504,11 +2015,23 @@
       return;
     }
     grid.innerHTML = list.map(v=>{
+      if(v.tipo === 'servicio'){
+        const s = v.servicio;
+        const disp = disponiblesServicio(s);
+        return `<button type="button" class="product-row" data-action="add-to-cart" data-id="${v.id}" ${disp<=0?'disabled':''}>
+          <div class="product-row-main">
+            <span class="product-row-name">${escapeHTML(v.nombre)}</span>
+            <span class="product-row-meta">Servicio${(s.materiales||[]).length ? ' · ' + (s.materiales||[]).length + ' material(es)' : ''}</span>
+          </div>
+          <span class="stock-pill stock-${disp<=0?'out':'ok'}">${disp<=0 ? 'Falta material' : 'Servicio'}</span>
+          <span class="product-row-price">${formatMoney(v.precio)}</span>
+        </button>`;
+      }
       const p = v.base;
       const disp = disponiblesDeVendible(v);
       const esPaquete = v.tipo==='paquete';
       const level = p.ilimitado ? 'ok' : (disp<=0 ? 'out' : (p.stock<=p.minStock ? 'low' : 'ok'));
-      const badgeText = p.ilimitado ? 'Ilimitado' : (disp<=0 ? 'Sin existencia' : (esPaquete ? `${disp} disponibles` : `${p.stock} en stock`));
+      const badgeText = p.ilimitado ? 'Ilimitado' : (disp<=0 ? 'Sin existencia' : (esPaquete ? `${disp} disponibles` : `${formatCantidad(p.stock)} en stock`));
       const promos = esPaquete ? [] : promosActivas(p);
       const meta = esPaquete
         ? `Paquete · ${v.piezas} pzas de ${escapeHTML(p.name)}${v.sku?' · '+escapeHTML(v.sku):''}`
@@ -1762,7 +2285,7 @@
         <td>${escapeHTML(p.category)}</td>
         <td class="mono">${escapeHTML(p.sku||'—')}</td>
         <td class="num">${textoPrecioInventario(p)}</td>
-        <td><span class="stock-pill stock-${level}">${p.ilimitado ? stockLabel : p.stock+' · '+stockLabel}</span></td>
+        <td><span class="stock-pill stock-${level}">${p.ilimitado ? stockLabel : formatCantidad(p.stock)+' · '+stockLabel}</span></td>
         ${supervisor ? `<td class="row-actions">
           ${p.ilimitado
             ? ''
@@ -1786,12 +2309,639 @@
   }
   function closeModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 
+  // ---------- Servicios (módulo opcional): materiales + mano de obra ----------
+  let borradorServicio = null;
+  function renderServicios(){
+    const tbody = document.getElementById('serviciosTableBody');
+    if(!tbody) return;
+    const lista = state.servicios || [];
+    if(!lista.length){
+      tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><p>Aún no hay servicios.</p><button type="button" class="btn-primary" data-action="servicio-nuevo">Crear el primero</button></div></td></tr>';
+      return;
+    }
+    const gestiona = puedeGestionar();
+    tbody.innerHTML = lista.map(s=>{
+      const costo = costoServicio(s);
+      const ganancia = Number(s.precio) - costo;
+      const mats = (s.materiales||[]).map(m=>{
+        const p = state.products.find(x=> x.id === m.productId);
+        return escapeHTML(p ? p.name : '(material borrado)') + ' ×' + formatCantidad(m.cantidad);
+      }).join(', ') || '—';
+      return `<tr>
+        <td>${escapeHTML(s.nombre)}</td>
+        <td class="num">${formatMoney(s.precio)}</td>
+        <td style="font-size:.82rem;">${mats}</td>
+        <td class="num">${formatMoney(s.manoObra||0)}</td>
+        <td class="num">${formatMoney(costo)}</td>
+        <td class="num" style="color:${ganancia<0?'var(--red)':'inherit'};">${formatMoney(ganancia)}</td>
+        <td class="row-actions">${gestiona ? `<button type="button" class="link-btn" data-action="servicio-editar" data-id="${s.id}">Editar</button>
+          <button type="button" class="link-btn danger" data-action="servicio-eliminar" data-id="${s.id}">Eliminar</button>` : ''}</td>
+      </tr>`;
+    }).join('');
+  }
+  function materialesDisponibles(){
+    return state.products.filter(p=> !p.ilimitado).slice().sort((a,b)=> a.name.localeCompare(b.name, 'es'));
+  }
+  function htmlMaterialServicio(m, i){
+    const opciones = '<option value="">— Escoge el material —</option>'
+      + materialesDisponibles().map(p=>`<option value="${p.id}"${m.productId===p.id?' selected':''}>${escapeHTML(p.name)} (hay ${formatCantidad(p.stock)})</option>`).join('');
+    return `<div class="compra-linea" data-i="${i}" style="grid-template-columns:minmax(180px,3fr) minmax(90px,1fr) auto;">
+      <label>Material<select data-campo="productId">${opciones}</select></label>
+      <label>Cantidad por servicio<input data-campo="cantidad" type="number" step="any" min="0" value="${escapeHTML(String(m.cantidad))}" /></label>
+      <button type="button" class="compra-quitar" data-action="servicio-quitar-material" data-i="${i}" aria-label="Quitar material">×</button>
+    </div>`;
+  }
+  function pintarMaterialesServicio(){
+    const cont = document.getElementById('servicioMateriales');
+    if(!cont || !borradorServicio) return;
+    cont.innerHTML = borradorServicio.materiales.map(htmlMaterialServicio).join('') || '<p style="color:var(--ink-soft); font-size:.85rem;">Sin materiales (solo mano de obra).</p>';
+    actualizarResumenServicio();
+  }
+  function actualizarResumenServicio(){
+    const el = document.getElementById('servicioResumen');
+    if(!el || !borradorServicio) return;
+    const b = borradorServicio;
+    const costoMat = b.materiales.reduce((sum,m)=>{
+      const p = state.products.find(x=> x.id === m.productId);
+      return sum + (p ? (Number(p.cost)||0) * (Number(m.cantidad)||0) : 0);
+    }, 0);
+    const costo = costoMat + (Number(b.manoObra)||0);
+    const ganancia = (Number(b.precio)||0) - costo;
+    el.innerHTML = 'Materiales: <b>' + formatMoney(costoMat) + '</b> · Mano de obra: <b>' + formatMoney(Number(b.manoObra)||0)
+      + '</b> · Costo total: <b>' + formatMoney(costo) + '</b> · Ganancia: <b style="color:' + (ganancia<0?'var(--red)':'inherit') + ';">' + formatMoney(ganancia) + '</b>';
+  }
+  function agregarMaterialServicio(){
+    if(!borradorServicio) return;
+    borradorServicio.materiales.push({ productId:'', cantidad:'' });
+    pintarMaterialesServicio();
+  }
+  function quitarMaterialServicio(i){
+    if(!borradorServicio) return;
+    borradorServicio.materiales.splice(i, 1);
+    pintarMaterialesServicio();
+  }
+  function abrirServicioModal(id){
+    if(!puedeGestionar()){ showToast('Necesitas el PIN de administrador (o ser supervisor) para crear o editar servicios.', 'warn'); return; }
+    const existente = id ? (state.servicios||[]).find(x=> x.id === id) : null;
+    if(id && !existente) return;
+    borradorServicio = existente
+      ? { nombre:existente.nombre, precio:existente.precio, manoObra:existente.manoObra||0, materiales:(existente.materiales||[]).map(m=>({ productId:m.productId, cantidad:m.cantidad })) }
+      : { nombre:'', precio:'', manoObra:0, materiales:[] };
+    openModal(existente ? 'Editar servicio' : 'Nuevo servicio', `
+      <form id="servicioForm" onsubmit="return false;">
+        <div class="compra-cabecera">
+          <label>Nombre del servicio*<input data-cab="nombre" type="text" maxlength="60" placeholder="Ej. Cambio de aceite" value="${escapeHTML(borradorServicio.nombre)}" /></label>
+          <label>Precio al cliente*<input data-cab="precio" type="number" step="0.01" min="0" value="${escapeHTML(String(borradorServicio.precio))}" /></label>
+          <label>Mano de obra (tu costo)<input data-cab="manoObra" type="number" step="0.01" min="0" value="${escapeHTML(String(borradorServicio.manoObra))}" /></label>
+        </div>
+        <p style="font-size:.8rem; color:var(--ink-soft); margin:10px 0 4px;">Materiales que se usan en cada servicio (se descuentan del inventario al venderlo). Se aceptan decimales, por ejemplo 3.5 litros.</p>
+        <div id="servicioMateriales"></div>
+        <button type="button" class="btn-secondary btn-sm" data-action="servicio-agregar-material">+ Agregar material</button>
+        <p id="servicioResumen" style="margin-top:12px; font-size:.88rem;"></p>
+      </form>
+    `, `
+      <button type="button" class="btn-ghost" data-action="close-modal">Cancelar</button>
+      <button type="button" class="btn-primary" data-action="servicio-guardar" data-id="${existente ? existente.id : ''}">Guardar servicio</button>
+    `);
+    const m = document.querySelector('#modalRoot .modal'); if(m) m.classList.add('modal-ancho');
+    const form = document.getElementById('servicioForm');
+    const alEditar = (e)=>{
+      const t = e.target;
+      if(!borradorServicio || !t) return;
+      if(t.dataset.cab){ borradorServicio[t.dataset.cab] = t.value; actualizarResumenServicio(); return; }
+      const fila = t.closest ? t.closest('.compra-linea') : null;
+      if(!fila || !t.dataset.campo) return;
+      const i = Number(fila.dataset.i);
+      borradorServicio.materiales[i][t.dataset.campo] = t.value;
+      actualizarResumenServicio();
+    };
+    form.addEventListener('input', alEditar);
+    form.addEventListener('change', alEditar);
+    pintarMaterialesServicio();
+  }
+  function guardarServicio(id){
+    if(bloqueadoPorSuspension()) return;
+    if(!puedeGestionar()){ showToast('Necesitas el PIN de administrador (o ser supervisor).', 'warn'); return; }
+    const b = borradorServicio;
+    if(!b) return;
+    const nombre = (b.nombre||'').trim();
+    const precio = Number(b.precio), manoObra = Number(b.manoObra === '' ? 0 : b.manoObra);
+    if(!nombre){ showToast('Escribe el nombre del servicio.', 'warn'); return; }
+    if((state.servicios||[]).some(s=> s.id !== id && s.nombre.trim().toLowerCase() === nombre.toLowerCase())){ showToast('Ya hay un servicio con ese nombre.', 'warn'); return; }
+    if(!(precio > 0)){ showToast('Escribe el precio al cliente.', 'warn'); return; }
+    if(!(manoObra >= 0)){ showToast('Revisa la mano de obra.', 'warn'); return; }
+    const materiales = [];
+    for(const m of b.materiales){
+      if(!m.productId && (m.cantidad === '' || m.cantidad === undefined)) continue;   // renglón vacío
+      const cant = Number(m.cantidad);
+      if(!m.productId){ showToast('Escoge el material de cada renglón (o quita el renglón vacío).', 'warn'); return; }
+      if(!(cant > 0)){ showToast('La cantidad de cada material debe ser mayor a 0.', 'warn'); return; }
+      const previo = materiales.find(x=> x.productId === m.productId);
+      if(previo) previo.cantidad = r3(previo.cantidad + cant); else materiales.push({ productId:m.productId, cantidad:r3(cant) });
+    }
+    if(id){
+      const s = state.servicios.find(x=> x.id === id);
+      if(!s) return;
+      Object.assign(s, { nombre, precio:r2(precio), manoObra:r2(manoObra), materiales });
+      cart = cart.filter(c=> c.productId !== id);        // el carrito se recalcula con los datos nuevos
+    }else{
+      state.servicios.push({ id: uid('sv_'), nombre, precio:r2(precio), manoObra:r2(manoObra), materiales });
+    }
+    saveState();
+    markSnapshotDirty();
+    closeModal();
+    borradorServicio = null;
+    renderServicios(); renderCategoryChips(); renderVenderGrid(); renderCart();
+    showToast('Servicio guardado.', 'success');
+  }
+  function pedirEliminarServicio(id){
+    if(!puedeGestionar()){ showToast('Necesitas el PIN de administrador (o ser supervisor).', 'warn'); return; }
+    const s = (state.servicios||[]).find(x=> x.id === id);
+    if(!s) return;
+    openModal('Eliminar servicio', `<p style="font-size:.9rem;">¿Eliminar el servicio <b>${escapeHTML(s.nombre)}</b>? Las ventas que ya se hicieron no cambian y el inventario no se toca.</p>`, `
+      <button type="button" class="btn-ghost" data-action="close-modal">Cancelar</button>
+      <button type="button" class="btn-danger" data-action="servicio-eliminar-ok" data-id="${s.id}">Eliminar</button>`);
+  }
+  function eliminarServicio(id){
+    if(!puedeGestionar()) return;
+    state.servicios = (state.servicios||[]).filter(s=> s.id !== id);
+    cart = cart.filter(c=> c.productId !== id);
+    saveState();
+    markSnapshotDirty();
+    closeModal();
+    renderServicios(); renderCategoryChips(); renderVenderGrid(); renderCart();
+    showToast('Servicio eliminado.', 'success');
+  }
+  // En un equipo nuevo, recupera el catálogo de servicios del respaldo en la nube
+  async function restaurarServicios(){
+    if(!cloudEnabled || !state.negocioId || !moduloActivo('servicios') || (state.servicios||[]).length) return;
+    try{
+      const { data } = await supabaseClient.from('inventario_snapshot').select('extras').eq('negocio_id', state.negocioId).maybeSingle();
+      if(data && data.extras && Array.isArray(data.extras.servicios) && data.extras.servicios.length){
+        state.servicios = data.extras.servicios;
+        saveState();
+        renderServicios(); renderCategoryChips(); renderVenderGrid();
+      }
+    }catch(e){ /* sin respaldo disponible */ }
+  }
+
+  // ---------- Gastos de caja (módulo opcional) ----------
+  function htmlGastosTurno(){
+    const t = state.turnoActual;
+    const lista = (state.gastosCaja||[]).filter(g=> g.turnoId === t.id);
+    const total = lista.reduce((s,g)=> s + (Number(g.monto)||0), 0);
+    const filas = lista.map(g=>`<tr>
+      <td>${new Date(g.fechaISO).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${escapeHTML(g.concepto)}</td><td>${escapeHTML(g.cajero||'')}</td><td class="num">${formatMoney(g.monto)}</td></tr>`).join('');
+    return `<div class="turno-card abierto" id="gastosTurnoCard" style="margin-top:14px;">
+      <h3>Gastos de caja del turno</h3>
+      ${lista.length ? `<div class="table-scroll"><table class="data-table"><thead><tr><th>Hora</th><th>Concepto</th><th>Quién</th><th class="num">Monto</th></tr></thead><tbody>${filas}</tbody></table></div>`
+        : '<p style="color:var(--ink-soft); font-size:.88rem; margin:6px 0 10px;">Aún no hay gastos en este turno.</p>'}
+      <p style="margin:10px 0 12px; font-weight:700;">Total: ${formatMoney(total)} <span style="font-weight:400; font-size:.8rem; color:var(--ink-soft);">(ya se descuenta del efectivo esperado del corte)</span></p>
+      <button type="button" class="btn-secondary" data-action="gasto-nuevo">Registrar gasto</button>
+    </div>`;
+  }
+  function renderTurnoEstado(){
+    renderTurnoEstadoBase();
+    const area = document.getElementById('turnoEstadoArea');
+    if(area && cloudEnabled && state.turnoActual && moduloActivo('gastos')){
+      area.insertAdjacentHTML('beforeend', htmlGastosTurno());
+    }
+  }
+  function abrirGastoModal(){
+    if(!state.turnoActual){ showToast('Abre un turno antes de registrar un gasto.', 'warn'); return; }
+    openModal('Registrar gasto de caja', `
+      <form id="gastoForm" class="form-grid">
+        <label>Concepto*<input required name="concepto" type="text" maxlength="80" placeholder="Ej. Refacciones, comida, gasolina" /></label>
+        <label>Monto*<input required name="monto" type="number" min="0" step="0.01" inputmode="decimal" /></label>
+        <label>Código de cajero (quien toma el dinero)*<input required name="codigo" type="password" inputmode="numeric" autocomplete="off" /></label>
+      </form>
+    `, `
+      <button type="button" class="btn-ghost" data-action="close-modal">Cancelar</button>
+      <button type="button" class="btn-primary" data-action="gasto-guardar">Registrar gasto</button>
+    `);
+  }
+  function guardarGasto(){
+    const t = state.turnoActual;
+    const form = document.getElementById('gastoForm');
+    if(!t || !form) return;
+    const concepto = form.concepto.value.trim();
+    const monto = Number(form.monto.value);
+    const codigo = form.codigo.value.trim();
+    if(!concepto){ showToast('Escribe en qué se gastó.', 'warn'); return; }
+    if(!(monto > 0)){ showToast('Escribe el monto del gasto.', 'warn'); return; }
+    const cajero = state.cajeros.find(c=> c.codigo.trim().toLowerCase() === codigo.toLowerCase());
+    if(!cajero){ showToast('Código de cajero no reconocido.', 'error'); return; }
+    const esperado = calcularEsperadoTurno(t.id, t.fondoInicial);
+    const gasto = { id: uid('g_'), turnoId: t.id, cajero: cajero.nombre, concepto, monto: r2(monto), fechaISO: new Date().toISOString() };
+    state.gastosCaja.push(gasto);
+    if(state.gastosCaja.length > 300) state.gastosCaja = state.gastosCaja.slice(-300);
+    state.pendingGastos.push(gasto);
+    saveState();
+    logEvento('gasto_caja', { concepto, monto: gasto.monto }, cajero.nombre);
+    flushSync();
+    closeModal();
+    renderTurnoEstado();
+    showToast(esperado.efectivo - monto < 0
+      ? 'Gasto registrado. Ojo: es mayor al efectivo que debería haber en caja.'
+      : 'Gasto registrado y descontado del efectivo esperado.', esperado.efectivo - monto < 0 ? 'warn' : 'success');
+  }
+  // En un equipo nuevo (o al reabrir), recupera los gastos del turno abierto desde la nube
+  async function restaurarGastosTurno(){
+    const t = state.turnoActual;
+    if(!cloudEnabled || !state.negocioId || !t || !moduloActivo('gastos')) return;
+    try{
+      const { data } = await traerTodo(()=> supabaseClient.from('gastos_caja').select('*')
+        .eq('negocio_id', state.negocioId).eq('turno_id', t.id).order('fecha_hora', {ascending:true}).order('id', {ascending:true}));
+      if(!data) return;
+      const pendientes = new Set((state.pendingGastos||[]).map(g=> g.id));
+      const locales = (state.gastosCaja||[]).filter(g=> g.turnoId !== t.id || pendientes.has(g.id));
+      const nube = data.map(g=>({ id:g.id, turnoId:g.turno_id, cajero:g.cajero||'', concepto:g.concepto, monto:Number(g.monto)||0, fechaISO:g.fecha_hora }));
+      state.gastosCaja = locales.concat(nube);
+      saveState();
+      renderTurnoEstado();
+    }catch(e){ /* sin conexión: se intentará en la próxima apertura */ }
+  }
+
+  // ---------- Compras por factura (módulo opcional) ----------
+  const COMPRAS_LIMITE = 15;
+  const COMPRAS_LOCALES_MAX = 400;
+  // El navegador guarda todo el POS en un solo espacio de ~5 MB. Las facturas completas viven en la nube;
+  // en el equipo se guarda una copia compacta de las más recientes, sin pasar de este presupuesto.
+  const COMPRAS_LOCALES_PRESUPUESTO = 700000;   // caracteres (~0.7 MB)
+  function compraCompacta(f){
+    return { id:f.id, numero:f.numero, proveedor:f.proveedor, fecha:f.fecha, uuid:f.uuid, total:f.total, creadaISO:f.creadaISO,
+      items:(f.items||[]).map(it=>({ productId:it.productId, nombre:it.nombre, sku:it.sku, cantidad:it.cantidad, costoUnit:it.costoUnit, importe:it.importe })) };
+  }
+  function recortarComprasLocales(){
+    let usado = 0;
+    const conservar = [];
+    for(const f of (state.compras||[])){
+      const tam = JSON.stringify(f).length;
+      if(conservar.length >= COMPRAS_LOCALES_MAX) break;
+      if(conservar.length && usado + tam > COMPRAS_LOCALES_PRESUPUESTO) break;
+      usado += tam;
+      conservar.push(f);
+    }
+    state.compras = conservar;
+  }
+  let comprasBusqueda = '', comprasVerTodo = false;
+  let borradorCompra = null;
+
+  function productosParaCompra(){
+    return state.products.filter(p=> !p.ilimitado).slice().sort((a,b)=> a.name.localeCompare(b.name, 'es'));
+  }
+  // Mapa producto → facturas en las que llegó (para buscar en el inventario por número de factura)
+  function facturasPorProducto(){
+    const mapa = {};
+    (state.compras||[]).forEach(f=>{
+      (f.items||[]).forEach(it=>{ (mapa[it.productId] = mapa[it.productId] || []).push({ numero:f.numero, proveedor:f.proveedor||'' }); });
+    });
+    return mapa;
+  }
+  function filtrarCompras(consulta){
+    const q = normalizarBusqueda(consulta);
+    const lista = state.compras || [];
+    if(!q) return lista;
+    return lista.filter(f=>{
+      const campos = [f.numero, f.proveedor, f.uuid, f.fecha];
+      (f.items||[]).forEach(it=>{ campos.push(it.nombre, it.sku, it.descripcion); });
+      return campos.some(c=> normalizarBusqueda(c).includes(q));
+    });
+  }
+  function renderCompras(){
+    const tbody = document.getElementById('comprasTableBody');
+    if(!tbody) return;
+    const pie = document.getElementById('comprasMoreWrap');
+    const total = (state.compras||[]).length;
+    if(!total){
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><p>Aún no hay facturas registradas.</p><button type="button" class="btn-primary" data-action="compras-nueva">Registrar la primera</button></div></td></tr>';
+      if(pie) pie.innerHTML = '';
+      return;
+    }
+    const filtradas = filtrarCompras(comprasBusqueda);
+    if(!filtradas.length){
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state">No hay facturas que coincidan con «' + escapeHTML(comprasBusqueda) + '».</div></td></tr>';
+      if(pie) pie.innerHTML = '';
+      return;
+    }
+    const visibles = comprasVerTodo ? filtradas : filtradas.slice(0, COMPRAS_LIMITE);
+    if(pie) pie.innerHTML = pieInventario(filtradas.length, comprasVerTodo, 'compras-ver-todo', 'compras-ver-menos');
+    tbody.innerHTML = visibles.map(f=>`<tr>
+      <td>${escapeHTML(f.fecha||'')}</td>
+      <td>${escapeHTML(f.numero)}</td>
+      <td>${escapeHTML(f.proveedor||'—')}</td>
+      <td class="num">${(f.items||[]).length}</td>
+      <td class="num">${formatMoney(f.total)}</td>
+      <td class="row-actions"><button type="button" class="link-btn" data-action="compras-ver" data-id="${f.id}">Ver</button></td>
+    </tr>`).join('');
+  }
+  function abrirDetalleCompra(id){
+    const f = (state.compras||[]).find(x=>x.id===id);
+    if(!f) return;
+    const filas = (f.items||[]).map(it=>`<tr>
+      <td>${escapeHTML(it.nombre)}${it.sku?'<br><span class="mono" style="font-size:.74rem;">'+escapeHTML(it.sku)+'</span>':''}</td>
+      <td class="num">${formatCantidad(it.cantidad)}</td>
+      <td class="num">${formatMoney(it.costoUnit)}</td>
+      <td class="num">${formatMoney(it.importe)}</td>
+    </tr>`).join('');
+    openModal('Factura ' + escapeHTML(f.numero), `
+      <p style="font-size:.88rem; color:var(--ink-soft); margin:0 0 10px;">
+        ${escapeHTML(f.proveedor||'Sin proveedor')} · ${escapeHTML(f.fecha||'')}
+        ${f.uuid ? '<br><span class="mono" style="font-size:.74rem;">UUID: '+escapeHTML(f.uuid)+'</span>' : ''}
+      </p>
+      <div class="table-scroll"><table class="data-table">
+        <thead><tr><th>Producto</th><th class="num">Piezas</th><th class="num">Costo c/u</th><th class="num">Importe</th></tr></thead>
+        <tbody>${filas}</tbody>
+      </table></div>
+      <p style="margin-top:12px; font-weight:700;">Total sin IVA: ${formatMoney(f.total)}</p>
+    `, '<button type="button" class="btn-primary" data-action="close-modal">Cerrar</button>');
+    const m = document.querySelector('#modalRoot .modal'); if(m) m.classList.add('modal-ancho');
+  }
+
+  // --- Factura electrónica (XML / CFDI): se lee aquí mismo, en el navegador; el archivo no se envía a ningún lado
+  function parsearCfdi(texto){
+    let doc;
+    try{ doc = new DOMParser().parseFromString(String(texto||'').replace(/^\uFEFF/, ''), 'application/xml'); }
+    catch(e){ return { ok:false, error:'No se pudo leer el archivo.' }; }
+    if(!doc || doc.getElementsByTagName('parsererror').length) return { ok:false, error:'El archivo no es un XML válido.' };
+    const buscar = (nombre)=> Array.from(doc.getElementsByTagNameNS('*', nombre));
+    const comp = buscar('Comprobante')[0];
+    if(!comp) return { ok:false, error:'No parece una factura electrónica (CFDI).' };
+    const tipo = comp.getAttribute('TipoDeComprobante') || '';
+    if(tipo && tipo !== 'I'){
+      return { ok:false, error: tipo === 'E' ? 'Es una nota de crédito (egreso), no una factura de compra.'
+        : tipo === 'P' ? 'Es un complemento de pago, no una factura de compra.'
+        : 'Este comprobante no es una factura de compra (tipo ' + tipo + ').' };
+    }
+    const emisor = buscar('Emisor')[0];
+    const timbre = buscar('TimbreFiscalDigital')[0];
+    const serie = comp.getAttribute('Serie') || '', folio = comp.getAttribute('Folio') || '';
+    const uuid = timbre ? (timbre.getAttribute('UUID') || '') : '';
+    let numero = (serie && folio) ? serie + '-' + folio : (folio || serie || '');
+    if(!numero && uuid) numero = uuid.slice(-8).toUpperCase();
+    const conceptos = buscar('Concepto').map(c=>{
+      const cantidad = Number(c.getAttribute('Cantidad')) || 0;
+      const importe = Number(c.getAttribute('Importe')) || 0;
+      const descuento = Number(c.getAttribute('Descuento')) || 0;
+      const valorUnitario = Number(c.getAttribute('ValorUnitario')) || 0;
+      return {
+        noId: c.getAttribute('NoIdentificacion') || '', descripcion: c.getAttribute('Descripcion') || '',
+        cantidad, unidad: c.getAttribute('Unidad') || c.getAttribute('ClaveUnidad') || '',
+        valorUnitario, importe, descuento,
+        costoUnit: cantidad > 0 ? ((importe - descuento) / cantidad) : valorUnitario   // ya con descuento, sin IVA
+      };
+    }).filter(c=> c.cantidad > 0);
+    if(!conceptos.length) return { ok:false, error:'La factura no trae productos.' };
+    return {
+      ok:true, numero, uuid, fecha: (comp.getAttribute('Fecha') || '').slice(0, 10),
+      proveedor: emisor ? (emisor.getAttribute('Nombre') || emisor.getAttribute('Rfc') || '') : '',
+      rfc: emisor ? (emisor.getAttribute('Rfc') || '') : '',
+      total: Number(comp.getAttribute('Total')) || 0, subtotal: Number(comp.getAttribute('SubTotal')) || 0, conceptos
+    };
+  }
+  function emparejarConcepto(c, rfc){
+    const clave = (rfc||'') + '|' + (c.noId || normalizarBusqueda(c.descripcion));
+    const guardada = (state.relacionesXml||{})[clave];
+    if(guardada && state.products.some(p=>p.id === guardada.productId)){
+      return { productId: guardada.productId, factor: guardada.factor || 1, estado:'relacionado' };
+    }
+    const prods = productosParaCompra();
+    if(c.noId){
+      const p = prods.find(x=> (x.sku||'').trim().toLowerCase() === c.noId.trim().toLowerCase());
+      if(p) return { productId:p.id, factor:1, estado:'relacionado' };
+    }
+    const nd = normalizarBusqueda(c.descripcion);
+    const p2 = prods.find(x=> normalizarBusqueda(x.name) === nd);
+    if(p2) return { productId:p2.id, factor:1, estado:'relacionado' };
+    return { productId:'__nuevo__', factor:1, estado:'nuevo' };
+  }
+  function lineaCompraVacia(){
+    return { productId:'', nombreNuevo:'', skuNuevo:'', precioNuevo:'', categoriaNuevo:'General', descripcion:'', noId:'', cantidad:'', factor:1, costoUnit:'', estado:'' };
+  }
+  async function leerArchivoComoTexto(archivo){
+    if(archivo && typeof archivo.text === 'function') return await archivo.text();
+    return await new Promise((ok, mal)=>{ const r = new FileReader(); r.onload = ()=> ok(String(r.result||'')); r.onerror = mal; r.readAsText(archivo); });
+  }
+  function abrirCompraDesdeXml(texto){
+    const r = parsearCfdi(texto);
+    if(!r.ok){ showToast(r.error, 'error'); return false; }
+    if(r.uuid && (state.compras||[]).some(f=> f.uuid && f.uuid.toLowerCase() === r.uuid.toLowerCase())){
+      showToast('Esa factura ya estaba registrada (mismo folio fiscal).', 'warn');
+      return false;
+    }
+    const lineas = r.conceptos.map(c=>{
+      const m = emparejarConcepto(c, r.rfc);
+      return Object.assign(lineaCompraVacia(), {
+        productId:m.productId, estado:m.estado, descripcion:c.descripcion, noId:c.noId,
+        nombreNuevo:c.descripcion, skuNuevo:c.noId, cantidad:c.cantidad, factor:m.factor,
+        costoUnit: Math.round(c.costoUnit*10000)/10000
+      });
+    });
+    abrirNuevaCompra({ numero:r.numero, proveedor:r.proveedor, rfc:r.rfc, fecha:r.fecha || todayStr(), uuid:r.uuid, lineas, desdeXml:true });
+    verificarFacturaEnNube(r.uuid);
+    return true;
+  }
+  // Las facturas más viejas ya no están en este equipo; la nube sí las tiene todas.
+  async function verificarFacturaEnNube(uuid){
+    if(!uuid || !cloudEnabled || !state.negocioId || !navigator.onLine) return;
+    try{
+      const { data } = await supabaseClient.from('compras_factura').select('id').eq('negocio_id', state.negocioId).eq('uuid_fiscal', uuid).limit(1);
+      const existe = Array.isArray(data) ? data.length > 0 : !!data;
+      if(existe && borradorCompra && borradorCompra.uuid === uuid){
+        closeModal();
+        borradorCompra = null;
+        showToast('Esa factura ya estaba registrada (mismo folio fiscal).', 'warn');
+      }
+    }catch(e){ /* sin conexión: la nube igual no deja guardarla dos veces */ }
+  }
+  document.addEventListener('change', async (e)=>{
+    if(!e.target || e.target.id !== 'comprasXmlInput') return;
+    const archivo = e.target.files && e.target.files[0];
+    if(!archivo) return;
+    try{ abrirCompraDesdeXml(await leerArchivoComoTexto(archivo)); }
+    catch(err){ showToast('No se pudo leer el archivo.', 'error'); }
+  });
+
+  // --- Captura / revisión de la factura
+  function htmlLineaCompra(l, i){
+    const opciones = '<option value="">— Escoge el producto —</option>'
+      + '<option value="__nuevo__"' + (l.productId==='__nuevo__' ? ' selected' : '') + '>➕ Producto nuevo</option>'
+      + productosParaCompra().map(p=>`<option value="${p.id}"${l.productId===p.id?' selected':''}>${escapeHTML(p.name)}</option>`).join('');
+    const etiqueta = l.estado === 'relacionado' ? ' <span class="stock-pill stock-ok">Relacionado</span>'
+      : (l.estado === 'nuevo' ? ' <span class="stock-pill stock-low">Nuevo</span>' : '');
+    return `<div class="compra-linea" data-i="${i}">
+      ${l.descripcion ? `<div class="compra-desc">${escapeHTML(l.descripcion)}${l.noId?' · <span class="mono">'+escapeHTML(l.noId)+'</span>':''}${etiqueta}</div>` : ''}
+      <label>Producto*<select data-campo="productId">${opciones}</select></label>
+      <label>Cantidad*<input data-campo="cantidad" type="number" step="any" min="0" value="${escapeHTML(String(l.cantidad))}" /></label>
+      <label title="Si la factura viene en cajas, cuántas piezas trae cada una">Piezas por unidad<input data-campo="factor" type="number" step="any" min="0" value="${escapeHTML(String(l.factor))}" /></label>
+      <label>Costo unitario (sin IVA)*<input data-campo="costoUnit" type="number" step="0.01" min="0" value="${escapeHTML(String(l.costoUnit))}" /></label>
+      <button type="button" class="compra-quitar" data-action="compra-quitar-linea" data-i="${i}" aria-label="Quitar renglón">×</button>
+      ${l.productId === '__nuevo__' ? `<div class="compra-nuevo">
+        <label>Nombre del producto nuevo*<input data-campo="nombreNuevo" type="text" maxlength="60" value="${escapeHTML(l.nombreNuevo)}" /></label>
+        <label>Código de barras / SKU<input data-campo="skuNuevo" type="text" maxlength="30" value="${escapeHTML(l.skuNuevo)}" /></label>
+        <label>Precio de venta*<input data-campo="precioNuevo" type="number" step="0.01" min="0" value="${escapeHTML(String(l.precioNuevo))}" /></label>
+      </div>` : ''}
+    </div>`;
+  }
+  function pintarLineasCompra(){
+    const cont = document.getElementById('compraLineas');
+    if(!cont || !borradorCompra) return;
+    cont.innerHTML = borradorCompra.lineas.map(htmlLineaCompra).join('') || '<p style="color:var(--ink-soft); font-size:.88rem;">Agrega los productos que llegaron con esta factura.</p>';
+    actualizarTotalCompra();
+  }
+  function actualizarTotalCompra(){
+    const el = document.getElementById('compraTotal');
+    if(!el || !borradorCompra) return;
+    const total = borradorCompra.lineas.reduce((s,l)=> s + (Number(l.cantidad)||0) * (Number(l.costoUnit)||0), 0);
+    el.textContent = borradorCompra.lineas.length + ' renglón(es) · Total sin IVA: ' + formatMoney(total);
+  }
+  function agregarLineaCompra(){
+    if(!borradorCompra) return;
+    borradorCompra.lineas.push(lineaCompraVacia());
+    pintarLineasCompra();
+  }
+  function quitarLineaCompra(i){
+    if(!borradorCompra) return;
+    borradorCompra.lineas.splice(i, 1);
+    pintarLineasCompra();
+  }
+  function abrirNuevaCompra(base){
+    borradorCompra = Object.assign({ numero:'', proveedor:'', rfc:'', fecha: todayStr(), uuid:'', lineas:[], desdeXml:false }, base || {});
+    if(!borradorCompra.lineas.length) borradorCompra.lineas.push(lineaCompraVacia());
+    openModal(borradorCompra.desdeXml ? 'Revisa la factura (leída del XML)' : 'Nueva factura de compra', `
+      <form id="compraForm" onsubmit="return false;">
+        <div class="compra-cabecera">
+          <label>Factura*<input data-cab="numero" type="text" maxlength="40" value="${escapeHTML(borradorCompra.numero)}" /></label>
+          <label>Proveedor<input data-cab="proveedor" type="text" maxlength="80" value="${escapeHTML(borradorCompra.proveedor)}" /></label>
+          <label>Fecha*<input data-cab="fecha" type="date" value="${escapeHTML(borradorCompra.fecha)}" /></label>
+          <label>Folio fiscal (UUID)<input data-cab="uuid" type="text" maxlength="40" value="${escapeHTML(borradorCompra.uuid)}" /></label>
+        </div>
+        ${borradorCompra.desdeXml ? '<p style="font-size:.8rem; color:var(--ink-soft); margin:10px 0 4px;">Revisa cada renglón antes de guardar. Los marcados como <b>Nuevo</b> se crearán como productos (ponles su precio de venta). Si la factura viene en cajas, escribe cuántas piezas trae cada una en "Piezas por unidad".</p>' : ''}
+        <div id="compraLineas" style="margin-top:12px;"></div>
+        <button type="button" class="btn-secondary btn-sm" data-action="compra-agregar-linea">+ Agregar producto</button>
+        <p id="compraTotal" style="margin-top:12px; font-weight:700;"></p>
+      </form>
+    `, `
+      <button type="button" class="btn-ghost" data-action="close-modal">Cancelar</button>
+      <button type="button" class="btn-primary" data-action="compra-guardar">Guardar factura</button>
+    `);
+    const m = document.querySelector('#modalRoot .modal'); if(m) m.classList.add('modal-ancho');
+    const form = document.getElementById('compraForm');
+    const alEditar = (e)=>{
+      const t = e.target;
+      if(!borradorCompra || !t) return;
+      if(t.dataset.cab){ borradorCompra[t.dataset.cab] = t.value; return; }
+      const fila = t.closest ? t.closest('.compra-linea') : null;
+      if(!fila || !t.dataset.campo) return;
+      const i = Number(fila.dataset.i);
+      borradorCompra.lineas[i][t.dataset.campo] = t.value;
+      if(t.dataset.campo === 'productId'){ borradorCompra.lineas[i].estado = ''; pintarLineasCompra(); }
+      else actualizarTotalCompra();
+    };
+    form.addEventListener('input', alEditar);
+    form.addEventListener('change', alEditar);
+    pintarLineasCompra();
+  }
+  function guardarCompra(){
+    if(bloqueadoPorSuspension()) return;
+    const b = borradorCompra;
+    if(!b) return;
+    const numero = (b.numero||'').trim();
+    const proveedor = (b.proveedor||'').trim();
+    const uuid = (b.uuid||'').trim();
+    if(!numero){ showToast('Escribe el número de factura.', 'warn'); return; }
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(b.fecha||'')){ showToast('Escribe la fecha de la factura.', 'warn'); return; }
+    if(!b.lineas.length){ showToast('Agrega al menos un producto.', 'warn'); return; }
+    const existentes = state.compras || [];
+    if(uuid && existentes.some(f=> f.uuid && f.uuid.toLowerCase() === uuid.toLowerCase())){ showToast('Esa factura ya está registrada (mismo folio fiscal).', 'warn'); return; }
+    if(existentes.some(f=> f.numero.toLowerCase() === numero.toLowerCase() && (f.proveedor||'').toLowerCase() === proveedor.toLowerCase())){
+      showToast('Ya hay una factura con ese número y ese proveedor.', 'warn'); return;
+    }
+    const lineas = [];
+    for(let i=0; i<b.lineas.length; i++){
+      const l = b.lineas[i];
+      const cant = Number(l.cantidad), factor = Number(l.factor === '' ? 1 : l.factor), costo = Number(l.costoUnit);
+      const n = i + 1;
+      if(!l.productId){ showToast('Renglón ' + n + ': escoge el producto.', 'warn'); return; }
+      if(l.productId === '__nuevo__'){
+        if(!(l.nombreNuevo||'').trim()){ showToast('Renglón ' + n + ': escribe el nombre del producto nuevo.', 'warn'); return; }
+        if(!(Number(l.precioNuevo) > 0)){ showToast('Renglón ' + n + ': escribe el precio de venta del producto nuevo.', 'warn'); return; }
+      }
+      if(!(cant > 0)){ showToast('Renglón ' + n + ': la cantidad debe ser mayor a 0.', 'warn'); return; }
+      if(!(factor > 0)){ showToast('Renglón ' + n + ': las piezas por unidad deben ser mayores a 0.', 'warn'); return; }
+      if(l.costoUnit === '' || !(costo >= 0)){ showToast('Renglón ' + n + ': escribe el costo unitario.', 'warn'); return; }
+      lineas.push({ l, cant, factor, costo });
+    }
+    const items = [];
+    lineas.forEach(({l, cant, factor, costo})=>{
+      const piezas = r3(cant * factor);
+      const costoPieza = Math.round(costo / factor * 10000) / 10000;
+      let p;
+      if(l.productId === '__nuevo__'){
+        p = addProduct({ name:l.nombreNuevo, category:(l.categoriaNuevo || 'General'), sku:(l.skuNuevo || ''), price:Number(l.precioNuevo), cost:costoPieza, stock:piezas, minStock:5 });
+      }else{
+        p = state.products.find(x=> x.id === l.productId);
+        receiveStock(l.productId, piezas, costoPieza);
+      }
+      if(!p) return;
+      items.push({ productId:p.id, nombre:p.name, sku:p.sku || '', cantidad:piezas, costoUnit:costoPieza, importe:r2(cant * costo), descripcion:l.descripcion || '' });
+      if(b.desdeXml && l.noId){ state.relacionesXml[(b.rfc||'') + '|' + l.noId] = { productId:p.id, factor }; }
+    });
+    const registro = { id: uid('cf_'), numero, proveedor, fecha:b.fecha, uuid, total: r2(items.reduce((s,it)=> s + it.importe, 0)), items, creadaISO: new Date().toISOString() };
+    state.compras.unshift(compraCompacta(registro));
+    recortarComprasLocales();                       // en el equipo solo las más recientes; la nube las guarda todas
+    state.pendingCompras.push(registro);
+    saveState();
+    markSnapshotDirty();
+    flushSync();
+    closeModal();
+    borradorCompra = null;
+    renderInventory(); renderInventarioAdminList(); renderVenderGrid(); renderCompras();
+    showToast('Factura ' + numero + ' guardada: ' + items.length + ' producto(s) sumados al inventario.', 'success');
+  }
+  // En un equipo nuevo, recupera las facturas guardadas en la nube
+  async function restaurarCompras(){
+    if(!cloudEnabled || !state.negocioId || !moduloActivo('compras') || (state.compras||[]).length) return;
+    try{
+      const { data } = await traerTodo(()=> supabaseClient.from('compras_factura').select('*')
+        .eq('negocio_id', state.negocioId).order('created_at', {ascending:false}).order('id', {ascending:true}));
+      if(data && data.length){
+        state.compras = data.map(f=> compraCompacta({ id:f.id, numero:f.numero, proveedor:f.proveedor||'', fecha:f.fecha, uuid:f.uuid_fiscal||'',
+          total:Number(f.total)||0, items:f.items||[], creadaISO:f.created_at }));
+        recortarComprasLocales();
+        saveState();
+        renderCompras();
+      }
+    }catch(e){ /* sin conexión: se intentará en la próxima apertura */ }
+  }
+
+
+
   // ---------- Novedades de la actualización ----------
   // Cada vez que se publica una versión nueva se agrega aquí un bloque con lo que cambió y los pasos para usarlo.
   // La ventana aparece una sola vez por equipo (hasta que se toca "Entendido") y también está en el menú.
-  const VERSION_APP = '2026.10.06';
+  const VERSION_APP = '2026.10.13';
   const NOVEDADES_KEY = 'oramNovedadesVistas_pos';
   const NOVEDADES = [
+    { version:'2026.10.13', items:[
+      { para:'todos', titulo:'Categorías en una sola línea',
+        detalle:'La barra de categorías de Vender ya no ocupa varias líneas.',
+        pasos:['En Vender, mira la barra de categorías: se ve en una sola línea.','Si hay más categorías de las que caben, aparece una flecha al final.','Tócala para ver todas; toca una categoría para filtrar.'] },
+      { para:'todos', titulo:'Ventas viejas desde la nube',
+        detalle:'El POS guarda en este equipo los últimos 60 días de ventas, para que no se llene la memoria. Las ventas más antiguas se consultan solas a la nube (necesitas internet) y se ven solo para consulta.' },
+      { para:'todos', titulo:'Corte de caja más exacto',
+        detalle:'Las ventas canceladas ya no se suman al efectivo esperado del corte. Antes podía aparecer un faltante que en realidad no existía.' },
+      { para:'todos', modulo:'compras', titulo:'Compras por factura',
+        detalle:'Registra la mercancía por factura y búscala después por número de factura, proveedor o producto.',
+        pasos:['Abre la pestaña Compras.','Toca "Nueva factura" y captura los productos, o "Cargar XML" para leer la factura electrónica.','Revisa los renglones (los marcados como Nuevo se crean como productos) y toca "Guardar factura".','Para buscar: escribe el número de factura en Compras o en Inventario.'] },
+      { para:'todos', modulo:'gastos', titulo:'Gastos de caja',
+        detalle:'Registra el dinero que sale de la caja chica. Se descuenta del efectivo esperado del corte.',
+        pasos:['Abre la pestaña Caja con un turno abierto.','Toca "Registrar gasto" y escribe el concepto y el monto.','Pon tu código de cajero. El corte ya lo descuenta.'] },
+      { para:'admin', modulo:'servicios', titulo:'Servicios con materiales y mano de obra',
+        detalle:'Vende servicios; los materiales se descuentan del inventario y la mano de obra cuenta como costo.',
+        pasos:['Entra a Administración con tu PIN y abre la pestaña Servicios.','Toca "Nuevo servicio": nombre, precio al cliente y mano de obra.','Agrega los materiales con su cantidad (se aceptan decimales, como 3.5 litros).','El servicio aparece en Vender como cualquier producto.'] }
+    ]},
     { version:'2026.10.06', items:[
       { para:'todos', titulo:'Buscador en Inventario',
         detalle:'Encuentra un producto sin recorrer toda la lista. También está en Administración → Inventario.',
@@ -1839,8 +2989,9 @@
     versiones = versiones.slice().sort((a,b)=> a.version < b.version ? 1 : -1);
     if(!versiones.length) return;
     const cuerpo = versiones.map(v=>{
-      const todos = v.items.filter(i=> i.para==='todos');
-      const admin = v.items.filter(i=> i.para==='admin');
+      const visibles = v.items.filter(i=> !i.modulo || moduloActivo(i.modulo));
+      const todos = visibles.filter(i=> i.para==='todos');
+      const admin = visibles.filter(i=> i.para==='admin');
       return (versiones.length>1 ? `<p class="novedades-version">Versión ${escapeHTML(v.version)}</p>` : '')
         + (todos.length ? `<h4 class="novedades-grupo">Para todos</h4>${todos.map(htmlTarjetaNovedad).join('')}` : '')
         + (admin.length ? `<h4 class="novedades-grupo">Para el dueño · en Administración (pide tu PIN)</h4>${admin.map(htmlTarjetaNovedad).join('')}` : '');
@@ -1858,7 +3009,7 @@
     if(novedadesProgramadas) return;
     novedadesProgramadas = true;
     if(NOVEDADES_DISPOSITIVO_NUEVO && !novedadesVistas()){ marcarNovedadesVistas(); return; }
-    if(!NOVEDADES.some(n=> n.version > novedadesVistas())) return;
+    if(!NOVEDADES.some(n=> n.version > novedadesVistas() && n.items.some(i=> !i.modulo || moduloActivo(i.modulo)))) return;
     const intentar = (n)=>{
       const hayModal = document.getElementById('modalRoot').innerHTML.trim() !== '';
       const hayBloqueo = document.getElementById('blockOverlayRoot').innerHTML.trim() !== '';
@@ -1905,7 +3056,7 @@
   }
 
   function openWhatsappTicketModal(saleId){
-    const sale = state.sales.find(s=>s.id===saleId);
+    const sale = buscarVenta(saleId);
     if(!sale){ showToast('No se encontró el ticket.', 'error'); return; }
     openModal('Enviar ticket por WhatsApp', `
       <form id="whatsappForm" class="form-grid">
@@ -1923,7 +3074,7 @@
     const form = document.getElementById('whatsappForm');
     const telefono = form.telefono.value.replace(/\D/g,'');
     if(!telefono){ showToast('Ingresa un teléfono válido.', 'warn'); return; }
-    const sale = state.sales.find(s=>s.id===saleId);
+    const sale = buscarVenta(saleId);
     if(!sale){ showToast('No se encontró el ticket.', 'error'); return; }
     const texto = construirTextoTicket(sale);
     if(esDispositivoMovil()){
@@ -1937,7 +3088,7 @@
   }
 
   function printReceipt(saleId, esReimpresion){
-    const sale = state.sales.find(s=>s.id===saleId);
+    const sale = buscarVenta(saleId);
     if(!sale){ showToast('No se encontró el ticket.', 'error'); return; }
     if(esReimpresion){ logEvento('reimpresion_ticket', { folio: sale.folio }); }
     const otro = document.getElementById('printMovimientos');
@@ -2177,7 +3328,7 @@
   function openReceiveStockModal(){
     const recibibles = state.products.filter(p=> !p.ilimitado);
     if(recibibles.length===0){ showToast('Primero agrega un producto al inventario.', 'warn'); return; }
-    const options = recibibles.map(p=>`<option value="${p.id}">${escapeHTML(p.name)} (existencia actual: ${p.stock})</option>`).join('');
+    const options = recibibles.map(p=>`<option value="${p.id}">${escapeHTML(p.name)} (existencia actual: ${formatCantidad(p.stock)})</option>`).join('');
     openModal('Recibir mercancía', `
       <form id="receiveStockForm" class="form-grid">
         <label>Producto*<select required name="productId" id="receiveProductSelect">${options}</select></label>
@@ -2355,7 +3506,17 @@
     output.innerHTML = '<p style="color:var(--ink-soft);">Calculando…</p>';
     const desdeD = new Date(desde+'T00:00:00');
     const hastaD = new Date(hasta+'T23:59:59');
-    const ventasList = state.sales.filter(s=> !s.cancelada && new Date(s.dateISO) >= desdeD && new Date(s.dateISO) <= hastaD);
+    let ventasList = state.sales.filter(s=> !s.cancelada && new Date(s.dateISO) >= desdeD && new Date(s.dateISO) <= hastaD);
+    if(state.ventasDesde && desde < state.ventasDesde){
+      // una parte del periodo es anterior a lo que guarda este equipo: se completa con la nube
+      const ultimoDia = hasta < state.ventasDesde ? hasta : sumarDias(state.ventasDesde, -1);
+      const nube = await ventasDeNubePorRango(desdeD.toISOString(), new Date(ultimoDia + 'T23:59:59.999').toISOString());
+      if(!nube){
+        output.innerHTML = '<p style="color:var(--red);">No se pudo consultar la nube para la parte antigua del periodo (anterior a los últimos ' + VENTAS_LOCALES_DIAS + ' días). Revisa tu conexión: no se muestran totales a medias.</p>';
+        return;
+      }
+      ventasList = nube.filter(s=> !s.cancelada).concat(ventasList);
+    }
     const ingreso = ventasList.reduce((sum,s)=> sum + s.total, 0);
     const costoVendido = ventasList.reduce((sum,s)=> sum + s.items.reduce((s2,it)=> s2 + (Number(it.cost)||0)*it.qty, 0), 0);
     const ganancia = ingreso - costoVendido;
@@ -2363,9 +3524,10 @@
     let inversion = 0;
     if(cloudEnabled && state.negocioId){
       try{
-        const { data: movs } = await supabaseClient.from('movimientos_inventario').select('cantidad, costo_unitario, producto_id')
+        const { data: movs } = await traerTodo(()=> supabaseClient.from('movimientos_inventario').select('cantidad, costo_unitario, producto_id')
           .eq('negocio_id', state.negocioId)
-          .gte('fecha_hora', desdeD.toISOString()).lte('fecha_hora', hastaD.toISOString());
+          .gte('fecha_hora', desdeD.toISOString()).lte('fecha_hora', hastaD.toISOString())
+          .order('fecha_hora', {ascending:true}).order('id', {ascending:true}));
         // Los productos ilimitados (ej. recargas) no son mercancía comprada: no cuentan como inversión.
         const idsIlimitados = new Set(state.products.filter(p=> p.ilimitado).map(p=> p.id));
         inversion = (movs||[]).filter(m=> !idsIlimitados.has(m.producto_id))
@@ -2412,7 +3574,26 @@
   function renderVentas(){
     const input = document.getElementById('ventasDateInput');
     if(input && input.value !== ventasDate) input.value = ventasDate;
-    const daySales = state.sales.filter(s=> dateStrFromISO(s.dateISO) === ventasDate);
+    let daySales, avisoViejo = '';
+    if(!diaCubiertoLocal(ventasDate)){
+      // día anterior a lo que guarda este equipo: se consulta en la nube (solo lectura)
+      const delDia = ventasNubeDia[ventasDate];
+      if(delDia === undefined){
+        cargarVentasViejasDia(ventasDate);
+        document.getElementById('ventasSummary').innerHTML = '';
+        document.getElementById('ventasTableBody').innerHTML = '<tr><td colspan="6"><div class="empty-state"><p>Consultando este día en la nube…</p></div></td></tr>';
+        return;
+      }
+      if(delDia === null){
+        document.getElementById('ventasSummary').innerHTML = '';
+        document.getElementById('ventasTableBody').innerHTML = '<tr><td colspan="6"><div class="empty-state"><p>No se pudo consultar este día. Es anterior a los últimos ' + VENTAS_LOCALES_DIAS + ' días que guarda este equipo y solo está en la nube: revisa tu conexión.</p></div></td></tr>';
+        return;
+      }
+      daySales = delDia;
+      avisoViejo = 'Día anterior a los últimos ' + VENTAS_LOCALES_DIAS + ' días: consultado en la nube (solo lectura).';
+    }else{
+      daySales = state.sales.filter(s=> dateStrFromISO(s.dateISO) === ventasDate);
+    }
     const vigentes = daySales.filter(s=> !s.cancelada);
     const total = vigentes.reduce((sum,s)=> sum+s.total, 0);
     const byMethod = {efectivo:0, transferencia:0, terminal:0};
@@ -2446,6 +3627,7 @@
       </div>
     `;
 
+    if(avisoViejo) document.getElementById('ventasSummary').insertAdjacentHTML('beforeend', '<div class="summary-note" style="grid-column:1 / -1; font-size:.8rem; color:var(--ink-soft);">' + avisoViejo + '</div>');
     const tbody = document.getElementById('ventasTableBody');
     if(daySales.length===0){
       tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><p>No se registraron ventas este día.</p></div></td></tr>`;
@@ -2468,17 +3650,32 @@
         <td class="row-actions">
           <button type="button" class="link-btn" data-action="print-ticket" data-id="${s.id}" data-reimpresion="true">Imprimir</button>
           <button type="button" class="link-btn" data-action="open-whatsapp-ticket" data-id="${s.id}">WhatsApp</button>
-          ${!s.cancelada ? `<button type="button" class="link-btn danger" data-action="open-cancelar-venta" data-id="${s.id}">Cancelar</button>` : ''}
+          ${!s.cancelada && !s.soloLectura ? `<button type="button" class="link-btn danger" data-action="open-cancelar-venta" data-id="${s.id}">Cancelar</button>` : ''}
         </td>
       </tr>`;
     }).join('');
   }
   function renderFolioSearch(query){
+    const q = (query||'').trim().toLowerCase();
+    const enEspera = !!(q.length >= 3 && state.ventasDesde && cloudEnabled && navigator.onLine && folioNubeCache[q] === undefined);
+    renderFolioSearchBase(query);
+    if(enEspera){
+      buscarFolioEnNube(q);
+      const c = document.getElementById('folioSearchResults');
+      if(c && c.classList.contains('active')){
+        if(c.textContent.includes('No se encontró')) c.innerHTML = '<div class="empty-state"><p>Buscando también en la nube…</p></div>';
+        else c.insertAdjacentHTML('beforeend', '<p style="font-size:.78rem; color:var(--ink-soft); margin:6px 2px;">Buscando también en la nube…</p>');
+      }
+    }
+  }
+  function renderFolioSearchBase(query){
     const container = document.getElementById('folioSearchResults');
     const q = (query||'').trim().toLowerCase();
     if(!q){ container.classList.remove('active'); container.innerHTML=''; return; }
     container.classList.add('active');
-    const matches = state.sales.filter(s=> s.folio.toLowerCase().includes(q)).sort((a,b)=> new Date(b.dateISO)-new Date(a.dateISO));
+    const locales = state.sales.filter(s=> s.folio.toLowerCase().includes(q));
+    const deNube = (q.length >= 3 && folioNubeCache[q]) ? folioNubeCache[q].filter(x=> !locales.some(l=> l.id === x.id)) : [];
+    const matches = locales.concat(deNube).sort((a,b)=> new Date(b.dateISO)-new Date(a.dateISO));
     if(matches.length===0){
       container.innerHTML = `<div class="empty-state"><p>No se encontró ningún ticket con ese folio.</p></div>`;
       return;
@@ -2499,7 +3696,7 @@
           <td class="row-actions">
             <button type="button" class="link-btn" data-action="print-ticket" data-id="${s.id}" data-reimpresion="true">Imprimir</button>
             <button type="button" class="link-btn" data-action="open-whatsapp-ticket" data-id="${s.id}">WhatsApp</button>
-            ${!s.cancelada ? `<button type="button" class="link-btn danger" data-action="open-cancelar-venta" data-id="${s.id}">Cancelar</button>` : ''}
+            ${!s.cancelada && !s.soloLectura ? `<button type="button" class="link-btn danger" data-action="open-cancelar-venta" data-id="${s.id}">Cancelar</button>` : ''}
           </td>
         </tr>`;
       }).join('')}</tbody>
@@ -2557,8 +3754,15 @@
     if(esPinAdmin){ registrarIntentoExitosoPin(); }
     const canceladaPor = esPinAdmin ? 'Administrador' : cajeroSupervisor.nombre;
     s.items.forEach(item=>{
+      if(item.consumo && item.consumo.length){      // servicio: regresan sus materiales
+        item.consumo.forEach(m=>{
+          const pm = state.products.find(x=>x.id===m.productId);
+          if(pm && !pm.ilimitado) pm.stock = r3(pm.stock + m.cantidad * item.qty);
+        });
+        return;
+      }
       const p = state.products.find(x=>x.id===item.productId);
-      if(p && !p.ilimitado) p.stock += item.qty*(item.piezas||1);
+      if(p && !p.ilimitado) p.stock = r3(p.stock + item.qty*(item.piezas||1));
     });
     s.cancelada = true;
     const canceladaEn = new Date().toISOString();
@@ -2566,7 +3770,7 @@
     s.canceladaEn = canceladaEn;
     saveState();
     markSnapshotDirty();
-    state.pendingCancelaciones.push({ folio: s.folio, cancelada_por: canceladaPor, cancelada_en: canceladaEn });
+    state.pendingCancelaciones.push({ id: s.id, folio: s.folio, cancelada_por: canceladaPor, cancelada_en: canceladaEn });
     saveState();
     flushSync();
     logEvento('cancelacion_venta', { folio: s.folio, total: s.total }, canceladaPor);
@@ -2578,7 +3782,8 @@
   // ---------- Rendering: Buscar ----------
   // ---------- Caja / turnos ----------
   function calcularEsperadoTurno(turnoId, fondoInicial){
-    const ventasTurno = state.sales.filter(s=> s.turnoId === turnoId);
+    // Una venta cancelada ya no está en la caja (se devolvió el dinero): no cuenta en el corte
+    const ventasTurno = state.sales.filter(s=> s.turnoId === turnoId && !s.cancelada);
     let efectivo = Number(fondoInicial)||0, transferencia = 0, terminal = 0;
     ventasTurno.forEach(s=>{
       if(s.method==='mixto' && s.pagoMixto){
@@ -2589,7 +3794,11 @@
       else if(s.method==='transferencia'){ transferencia += s.total; }
       else if(s.method==='terminal'){ terminal += s.total; }
     });
+    efectivo -= gastosDeTurno(turnoId);          // gastos de caja chica (módulo opcional)
     return { efectivo, transferencia, terminal };
+  }
+  function gastosDeTurno(turnoId){
+    return (state.gastosCaja||[]).filter(g=> g.turnoId === turnoId).reduce((s,g)=> s + (Number(g.monto)||0), 0);
   }
 
   // ---------- Bandeja de escaneos remotos (desde escaner.html) ----------
@@ -2688,7 +3897,7 @@
     }catch(e){ /* sin conexión: se reintenta en el siguiente ciclo */ }
   }
 
-  function renderTurnoEstado(){
+  function renderTurnoEstadoBase(){
     const area = document.getElementById('turnoEstadoArea');
     if(!area) return;
     if(!cloudEnabled){
@@ -2706,7 +3915,7 @@
     }
     const t = state.turnoActual;
     const esperado = calcularEsperadoTurno(t.id, t.fondoInicial);
-    const totalVentasTurno = esperado.efectivo + esperado.transferencia + esperado.terminal - t.fondoInicial;
+    const totalVentasTurno = esperado.efectivo + esperado.transferencia + esperado.terminal - t.fondoInicial + gastosDeTurno(t.id);   // lo vendido: los gastos de caja no restan a las ventas
     area.innerHTML = `
       <div class="turno-card abierto">
         <h3>Turno abierto</h3>
@@ -2834,6 +4043,7 @@
     return state.products.filter(p=>{
       const campos = [p.name, p.category, p.sku];
       (p.paquetes||[]).forEach(pk=>{ campos.push(pk.nombre, pk.sku); });
+      if(moduloActivo('compras')){ (facturasPorProducto()[p.id] || []).forEach(f=>{ campos.push(f.numero, f.proveedor); }); }
       return campos.some(c=> normalizarBusqueda(c).includes(q));
     });
   }
@@ -3042,7 +4252,7 @@
         <td>${escapeHTML(p.category)}</td>
         <td class="mono">${escapeHTML(p.sku||'—')}</td>
         <td class="num">${textoPrecioInventario(p)}</td>
-        <td><span class="stock-pill stock-${level}">${p.ilimitado ? stockLabel : p.stock+' · '+stockLabel}</span></td>
+        <td><span class="stock-pill stock-${level}">${p.ilimitado ? stockLabel : formatCantidad(p.stock)+' · '+stockLabel}</span></td>
         <td class="row-actions">
           <button type="button" class="link-btn" data-action="edit-product-admin" data-id="${p.id}">Editar</button>
           <button type="button" class="link-btn danger" data-action="delete-product" data-id="${p.id}">Eliminar</button>
@@ -3705,10 +4915,11 @@
     const t = state.turnoActual;
     if(!t) return;
     const esperado = calcularEsperadoTurno(t.id, t.fondoInicial);
+    const gastosTurno = gastosDeTurno(t.id);
     openModal('Cerrar turno / Corte de caja', `
       <form id="cerrarTurnoForm" class="form-grid">
         <label>Código de cajero (quien hace el corte)*<input required name="codigo" type="password" inputmode="numeric" autocomplete="off" /></label>
-        <label>Efectivo contado* — esperado ${formatMoney(esperado.efectivo)}<input required name="efectivo_contado" type="number" min="0" step="0.01" /></label>
+        <label>Efectivo contado* — esperado ${formatMoney(esperado.efectivo)}${gastosTurno>0 ? ' (ya descontados gastos por '+formatMoney(gastosTurno)+')' : ''}<input required name="efectivo_contado" type="number" min="0" step="0.01" /></label>
         <label>Transferencias confirmadas* — esperado ${formatMoney(esperado.transferencia)}<input required name="transferencia_contado" type="number" min="0" step="0.01" /></label>
         <label>Terminal bancaria confirmada* — esperado ${formatMoney(esperado.terminal)}<input required name="terminal_contado" type="number" min="0" step="0.01" /></label>
       </form>
@@ -3733,16 +4944,18 @@
         estado:'cerrado', fecha_cierre: new Date().toISOString(), cajero_cierre: cajero.nombre,
         efectivo_esperado: esperado.efectivo, transferencia_esperado: esperado.transferencia, terminal_esperado: esperado.terminal,
         efectivo_contado: efectivoContado, transferencia_contado: transferenciaContado, terminal_contado: terminalContado,
-        diferencia
+        diferencia,
+        ...(moduloActivo('gastos') ? { gastos_total: r2(gastosDeTurno(t.id)) } : {})
       }).eq('id', t.id);
       if(error){ showToast('No se pudo cerrar el turno.', 'error'); return; }
     }catch(e){ showToast('No se pudo conectar. Intenta de nuevo.', 'error'); return; }
     closeModal();
     state.turnoActual = null;
     saveState();
+    podarVentasLocales();
     detenerPollEscaneos();
     mostrarResultadoCorte({
-      cajero: cajero.nombre, diferencia,
+      cajero: cajero.nombre, diferencia, gastos: gastosDeTurno(t.id),
       detalle: [
         {label:'Efectivo', esperado: esperado.efectivo, contado: efectivoContado},
         {label:'Transferencia', esperado: esperado.transferencia, contado: transferenciaContado},
@@ -3766,6 +4979,7 @@
       <div class="corte-resultado ${clase}">
         <h4>${titulo}</h4>
         ${filas}
+        ${r.gastos > 0 ? `<div class="corte-detalle-row"><span>Gastos de caja (ya descontados del efectivo esperado)</span><span>${formatMoney(r.gastos)}</span></div>` : ''}
       </div>
     `, `
       <button type="button" class="btn-primary" data-action="close-modal">Entendido</button>
@@ -3842,6 +5056,27 @@
       case 'edit-paquete': openPaqueteModal(btn.dataset.pid, id); break;
       case 'save-paquete': handleSavePaquete(btn.dataset.pid, id); break;
       case 'save-monto': handleSaveMonto(id); break;
+      case 'ver-errores-sync': abrirErroresSync(); break;
+      case 'ver-estado-sistema': abrirEstadoSistema(); break;
+      case 'comprobar-seguridad': comprobarSeguridadAhora(); break;
+      case 'reintentar-errores-sync': reintentarErroresSync(); break;
+      case 'compras-nueva': abrirNuevaCompra(); break;
+      case 'compras-xml': { const inp = document.getElementById('comprasXmlInput'); if(inp){ inp.value = ''; inp.click(); } break; }
+      case 'compras-ver': abrirDetalleCompra(id); break;
+      case 'compras-ver-todo': comprasVerTodo = true; renderCompras(); break;
+      case 'compras-ver-menos': comprasVerTodo = false; renderCompras(); break;
+      case 'compra-agregar-linea': agregarLineaCompra(); break;
+      case 'compra-quitar-linea': quitarLineaCompra(Number(btn.dataset.i)); break;
+      case 'compra-guardar': guardarCompra(); break;
+      case 'servicio-nuevo': abrirServicioModal(); break;
+      case 'servicio-editar': abrirServicioModal(id); break;
+      case 'servicio-eliminar': pedirEliminarServicio(id); break;
+      case 'servicio-eliminar-ok': eliminarServicio(id); break;
+      case 'servicio-guardar': guardarServicio(btn.dataset.id || ''); break;
+      case 'servicio-agregar-material': agregarMaterialServicio(); break;
+      case 'servicio-quitar-material': quitarMaterialServicio(Number(btn.dataset.i)); break;
+      case 'gasto-nuevo': abrirGastoModal(); break;
+      case 'gasto-guardar': guardarGasto(); break;
       case 'open-novedades': { const mw = document.getElementById('menuWrap'); if(mw) mw.classList.remove('open'); abrirNovedades(true); break; }
       case 'novedades-entendido': marcarNovedadesVistas(); closeModal(); break;
       case 'inventario-ver-todo': inventarioVerTodo = true; renderInventory(); break;
@@ -3854,7 +5089,8 @@
       case 'edit-product-admin': openEditProductModal(id, true); break;
       case 'delete-product': openDeleteConfirm(id); break;
       case 'close-modal': closeModal(); break;
-      case 'category-chip': setCategory(btn.dataset.cat); break;
+      case 'category-chip': categoriasAbiertas = false; setCategory(btn.dataset.cat); break;
+      case 'toggle-categorias': alternarCategorias(); break;
       case 'save-add-product': handleSaveAddProduct(); break;
       case 'save-receive-stock': handleSaveReceiveStock(); break;
       case 'save-edit-product': handleSaveEditProduct(id); break;
@@ -3905,6 +5141,7 @@
     else if(e.target.id==='descuentoInput'){ updateDescuentoDisplay(); }
     else if(e.target.id==='folioSearchInput'){ renderFolioSearch(e.target.value); }
     else if(e.target.id==='inventarioSearchInput'){ inventarioBusqueda = e.target.value; inventarioVerTodo = false; renderInventory(); }
+    else if(e.target.id==='comprasBuscarInput'){ comprasBusqueda = e.target.value; comprasVerTodo = false; renderCompras(); }
     else if(e.target.id==='inventarioAdminSearchInput'){ adminInventarioBusqueda = e.target.value; adminInventarioVerTodo = false; renderInventarioAdminList(); }
   });
 
@@ -3985,6 +5222,15 @@
 
   // ---------- Init ----------
   function init(){
+    if(cloudEnabled && state.negocioId){
+      probarEncabezado();
+      if(!window.__sondeoEncabezadoTimer){
+        window.__sondeoEncabezadoTimer = setInterval(probarEncabezado, 30*60*1000);
+        window.addEventListener('online', ()=>{ probarEncabezado(); });
+      }
+    }
+    podarVentasLocales();
+    if(!window.__podaVentasTimer) window.__podaVentasTimer = setInterval(podarVentasLocales, 6*60*60*1000);
     const nameInput = document.getElementById('businessNameInput');
     nameInput.value = state.businessName;
     document.title = state.businessName + ' · Punto de Venta';
@@ -4011,6 +5257,7 @@
       flushSync();
       if(state.turnoActual) iniciarPollEscaneos();
     }
+    iniciarModulos();
     programarNovedades();
   }
 
