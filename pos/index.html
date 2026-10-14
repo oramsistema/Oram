@@ -626,11 +626,25 @@
       return defaultState();
     }
   }
+  let liberandoEspacio = false;
   function saveState(){
     try{
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     }catch(e){
       console.warn('No se pudo guardar el almacenamiento local', e);
+      if(!liberandoEspacio){
+        // Memoria del navegador llena: se libera lo más viejo (las ventas siguen completas en la nube) y se reintenta
+        liberandoEspacio = true;
+        try{
+          podarVentasLocales(14, 800000, true);
+          if(Array.isArray(state.compras) && state.compras.length > 50) state.compras = state.compras.slice(0, 50);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          liberandoEspacio = false;
+          showToast('La memoria de este equipo estaba llena: se liberó espacio con las ventas más viejas (siguen en la nube).', 'warn');
+          return;
+        }catch(e2){ /* sigue sin poder guardar */ }
+        liberandoEspacio = false;
+      }
       showToast('No se pudieron guardar los cambios en este dispositivo.', 'error');
     }
   }
@@ -1321,15 +1335,15 @@
     d.setDate(d.getDate() + n);
     return toDateInputValue(d);
   }
-  function corteVentasLocales(){
-    const dia = sumarDias(todayStr(), -VENTAS_LOCALES_DIAS);
+  function corteVentasLocales(dias){
+    const dia = sumarDias(todayStr(), -(dias || VENTAS_LOCALES_DIAS));
     return { dia, iso: new Date(dia + 'T00:00:00').toISOString() };
   }
   // ¿Este día completo está en la copia del equipo? (si no, hay que consultarlo en la nube)
   function diaCubiertoLocal(dateStr){ return !state.ventasDesde || dateStr >= state.ventasDesde; }
-  function podarVentasLocales(){
+  function podarVentasLocales(dias, presupuesto, noGuardar){
     if(!Array.isArray(state.sales) || !state.sales.length) return;
-    const corte = corteVentasLocales();
+    const corte = corteVentasLocales(dias);
     // Nunca se quita una venta que todavía no se ha enviado a la nube
     const pendientes = new Set((state.pendingVentas||[]).map(v=> v.id));
     let conservar = state.sales.filter(s=> dateStrFromISO(s.dateISO) >= corte.dia || pendientes.has(s.id));
@@ -1338,7 +1352,7 @@
     let usado = 0, desdeIdx = conservar.length;
     for(let i = conservar.length - 1; i >= 0; i--){
       const tam = JSON.stringify(conservar[i]).length;
-      if(usado + tam > VENTAS_LOCALES_PRESUPUESTO && !pendientes.has(conservar[i].id)) break;
+      if(usado + tam > (presupuesto || VENTAS_LOCALES_PRESUPUESTO) && !pendientes.has(conservar[i].id)) break;
       usado += tam; desdeIdx = i;
     }
     if(desdeIdx > 0){
@@ -1349,7 +1363,7 @@
     if(conservar.length === state.sales.length) return;       // no se quitó nada
     state.sales = conservar;
     if(!state.ventasDesde || corteDia > state.ventasDesde) state.ventasDesde = corteDia;
-    saveState();
+    if(!noGuardar) saveState();
   }
   function ventaDeNube(v, soloLectura){
     const s = {
@@ -1494,6 +1508,8 @@
         <p style="margin:0;"><b>Respaldo en la nube:</b> ${respaldo}</p>
         <p style="margin:0;"><b>Seguridad entre clientes:</b> <span id="estadoSeguridadTexto">${escapeHTML(TEXTOS_PRIVACIDAD[estadoPrivacidad] || TEXTOS_PRIVACIDAD.desconocido)}</span></p>
         <p style="margin:0;"><b>Ventas guardadas en este equipo:</b> ${state.ventasDesde ? 'desde el ' + escapeHTML(state.ventasDesde) : 'todo el historial'}</p>
+        <p style="margin:0;"><b>Turno abierto en este equipo:</b> ${state.turnoActual ? 'sí, desde el ' + escapeHTML(new Date(state.turnoActual.fechaApertura).toLocaleString('es-MX')) : 'no'}</p>
+        <p style="margin:0;"><b>Memoria usada del navegador:</b> ${Math.round(JSON.stringify(state).length/1024)} KB de unos 5,000</p>
         <p style="margin:0;"><b>Versión del POS:</b> ${escapeHTML(VERSION_APP)}</p>
       </div>`, `
       <button type="button" class="btn-ghost" data-action="comprobar-seguridad">Comprobar ahora</button>
@@ -4897,6 +4913,22 @@
     const cajero = state.cajeros.find(c=> c.codigo.trim().toLowerCase() === codigo.toLowerCase());
     if(!cajero){ showToast('Código de cajero no reconocido.', 'error'); return; }
     try{
+      // Si ya hay un turno abierto en la nube, se retoma en lugar de abrir otro (así no se acumulan turnos fantasma)
+      const { data: yaAbierto } = await supabaseClient.from('turnos').select('*').eq('negocio_id', state.negocioId).eq('estado','abierto')
+        .order('fecha_apertura', {ascending:false}).limit(1);
+      if(yaAbierto && yaAbierto.length){
+        const ya = yaAbierto[0];
+        state.turnoActual = { id: ya.id, cajeroApertura: ya.cajero_apertura, fondoInicial: Number(ya.fondo_inicial)||0, fechaApertura: ya.fecha_apertura, esSupervisor: cajero.rol==='supervisor' };
+        saveState();
+        closeModal();
+        showToast('Ya había un turno abierto desde ' + new Date(ya.fecha_apertura).toLocaleString('es-MX') + ' (' + ya.cajero_apertura + '). Se retomó ese turno en lugar de abrir otro.', 'warn');
+        renderTurnoEstado();
+        cargarTurnosRecientes();
+        iniciarPollEscaneos();
+        return;
+      }
+    }catch(e){ /* sin conexión: se intenta abrir como siempre */ }
+    try{
       const { data, error } = await supabaseClient.from('turnos').insert({
         negocio_id: state.negocioId, cajero_apertura: cajero.nombre, fondo_inicial: fondoInicial
       }).select().single();
@@ -4911,6 +4943,23 @@
     }catch(e){ showToast('No se pudo conectar. Intenta de nuevo.', 'error'); }
   }
 
+  // Supabase es quien sabe si un turno sigue abierto. Si este equipo se quedó con uno que en la nube ya está
+  // cerrado (por ejemplo, otra ventana guardó una copia vieja), se quita para que no "reaparezca".
+  async function reconciliarTurno(){
+    const t = state.turnoActual;
+    if(!t || !cloudEnabled || !state.negocioId || !navigator.onLine) return;
+    try{
+      const { data, error } = await supabaseClient.from('turnos').select('id, estado').eq('id', t.id).maybeSingle();
+      if(error || !data) return;                       // sin respuesta clara: no se toca nada
+      if(data.estado !== 'abierto' && state.turnoActual && state.turnoActual.id === t.id){
+        state.turnoActual = null;
+        saveState();
+        detenerPollEscaneos();
+        renderTurnoEstado();
+        showToast('Ese turno ya estaba cerrado en la nube: se actualizó este equipo.', 'warn');
+      }
+    }catch(e){ /* sin conexión: se vuelve a revisar después */ }
+  }
   function openCerrarTurnoModal(){
     const t = state.turnoActual;
     if(!t) return;
@@ -5258,6 +5307,11 @@
       if(state.turnoActual) iniciarPollEscaneos();
     }
     iniciarModulos();
+    reconciliarTurno();
+    if(!window.__reconciliarTurnoTimer){
+      window.__reconciliarTurnoTimer = setInterval(reconciliarTurno, 5*60*1000);
+      window.addEventListener('focus', ()=>{ reconciliarTurno(); });
+    }
     programarNovedades();
   }
 
