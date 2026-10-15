@@ -171,6 +171,18 @@
   .chips-toggle{ flex:none; width:34px; height:34px; border-radius:50%; border:1px solid var(--line); background:var(--surface); color:var(--ink-soft); font-size:1rem; line-height:1; cursor:pointer; }
   .chips-toggle.abierto{ transform:rotate(180deg); }
   .tab-item[hidden]{ display:none !important; }
+  .buscador-prod{ position:relative; }
+  .buscador-prod-input{ width:100%; }
+  .buscador-prod-lista{ max-height:230px; overflow:auto; border:1px solid var(--line); border-radius:var(--radius-md); background:var(--surface); margin-top:4px; box-shadow:0 6px 18px rgba(0,0,0,.10); }
+  .buscador-prod-item{ padding:8px 10px; cursor:pointer; font-size:.88rem; }
+  .buscador-prod-item.activo, .buscador-prod-item:hover{ background:var(--surface-alt); }
+  .buscador-prod-item.elegido{ font-weight:700; }
+  .buscador-prod-vacio{ padding:8px 10px; color:var(--ink-soft); font-size:.84rem; }
+  .subtotal-edit{ display:inline-flex; align-items:center; gap:2px; font-weight:800; }
+  .precio-inline{ width:104px; padding:3px 6px; border:1.5px solid var(--accent, #2563eb); border-radius:6px; font:inherit; font-weight:800; text-align:right; background:var(--surface); color:inherit; cursor:text; -moz-appearance:textfield; appearance:textfield; }
+  .precio-inline::-webkit-outer-spin-button, .precio-inline::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
+  .precio-inline:focus{ outline:2px solid var(--accent, #2563eb); outline-offset:1px; }
+  .precio-inline.invalido{ border-color:var(--red); }
   #estadoPrivacidad[data-estado="listo"]{ color:var(--green-600); }
   #estadoPrivacidad[data-estado="sin_funcion"]{ color:var(--ink-soft); }
   #estadoPrivacidad[data-estado="bloqueado"], #estadoPrivacidad[data-estado="no_llega"]{ color:var(--red); font-weight:700; }
@@ -612,7 +624,12 @@
       pinIntentosFallidos:0, pinBloqueadoHasta:0, licenciaCodigo:'',
       pendingVentas:[], pendingMovimientos:[], pendingCancelaciones:[], snapshotDirty:false,
       modulos:{}, servicios:[], compras:[], gastosCaja:[], pendingGastos:[], pendingCompras:[], relacionesXml:{},
-      ventasDesde:'', pendingErrores:[]
+      ventasDesde:'', pendingErrores:[],
+      maquinaId:'', folioProvisional:0, ultimoSeqVentas:0, seqVentasListo:false, multiAuto:false, numMaquinas:1,
+      catalogoMulti:{}, pendingCatalogo:[], pendingStock:[], ultimoSeqCatalogo:0, catalogoMultiListo:false,
+      ultimoSeqGastos:0, seqGastosListo:false, ultimoSeqCompras:0, seqComprasListo:false,
+      serviciosMulti:{}, pendingServicios:[], ultimoSeqServicios:0, serviciosMultiListo:false,
+      pendingComprasCambios:[]
     };
   }
   function loadState(){
@@ -765,7 +782,12 @@
         state.licenciaCodigo = '';
         state.modulos = {}; state.servicios = []; state.compras = []; state.gastosCaja = [];
         state.pendingGastos = []; state.pendingCompras = []; state.relacionesXml = {};
-        state.ventasDesde = ''; state.pendingErrores = [];
+        state.ventasDesde = ''; state.pendingErrores = []; state.ultimoSeqVentas = 0; state.seqVentasListo = false; state.folioProvisional = 0; state.multiAuto = false; state.numMaquinas = 1;
+        state.catalogoMulti = {}; state.pendingCatalogo = []; state.pendingStock = []; state.ultimoSeqCatalogo = 0; state.catalogoMultiListo = false;
+        state.ultimoSeqGastos = 0; state.seqGastosListo = false; state.ultimoSeqCompras = 0; state.seqComprasListo = false;
+        state.serviciosMulti = {}; state.pendingServicios = []; state.ultimoSeqServicios = 0; state.serviciosMultiListo = false;
+        state.pendingComprasCambios = [];
+        detenerMulti();
         ventasNubeDia = {}; ventasNubePorId = {}; folioNubeCache = {};
         ultimaCargaModulos = 0;
         detenerPollEscaneos();
@@ -879,6 +901,9 @@
         if(ventasCloud){
           state.sales = ventasCloud.map(v=> ventaDeNube(v, false));
           state.ventasDesde = corte.dia;           // este equipo cubre desde aquí; lo anterior se consulta en la nube
+          const maxSeq = ventasCloud.reduce((m, v)=> Math.max(m, Number(v.seq) || 0), 0);
+          state.ultimoSeqVentas = maxSeq;
+          state.seqVentasListo = true;
           let maxFolio = 0;
           state.sales.forEach(s=>{
             const m = /V-(\d+)/.exec(s.folio || '');
@@ -941,6 +966,7 @@
   }
   async function verificarEstatus(){
     if(!cloudEnabled || !state.negocioId) return;
+    sinEtapa4 = false;           // por si el SQL de anular/corregir facturas se corrió con el POS abierto: se vuelve a intentar enviar lo pendiente
     ultimaVerificacionEstatus = Date.now();
     try{
       const { data, error } = await supabaseClient
@@ -1017,6 +1043,11 @@
   }
   function markSnapshotDirty(){
     if(!cloudEnabled) return;
+    if(multiActivo()){                                                  // varias máquinas: se manda solo lo que cambió
+      if(state.catalogoMultiListo) registrarCambiosCatalogoMulti();
+      if(state.serviciosMultiListo && moduloActivo('servicios')) registrarCambiosServiciosMulti();
+      if(state.catalogoMultiListo || state.serviciosMultiListo) programarSincMulti();
+    }
     state.snapshotDirty = true;
     saveState();
     flushSync();
@@ -1056,6 +1087,7 @@
         });
         if(error && !resolverErrorSync('venta', v, error)) break;
         state.pendingVentas.shift();
+        avisarCambioMulti();
         saveState();
       }
       while(state.pendingMovimientos.length){
@@ -1068,26 +1100,50 @@
         state.pendingMovimientos.shift();
         saveState();
       }
+      const extrasAntes = (state.pendingGastos||[]).length + (state.pendingCompras||[]).length + (state.pendingComprasCambios||[]).length;
       while((state.pendingGastos||[]).length){
         const g = state.pendingGastos[0];
-        const { error } = await supabaseClient.from('gastos_caja').insert({
+        const fila = {
           negocio_id: state.negocioId, turno_id: g.turnoId || null, cajero: g.cajero || null,
           concepto: g.concepto, monto: g.monto, fecha_hora: g.fechaISO
-        });
+        };
+        if(!sinLocalId) fila.local_id = g.id;          // con su número local, el gasto no se duplica aunque se reintente el envío
+        let { error } = await supabaseClient.from('gastos_caja').insert(fila);
+        if(error && !sinLocalId && esErrorColumnaLocalId(error)){ sinLocalId = true; delete fila.local_id; ({ error } = await supabaseClient.from('gastos_caja').insert(fila)); }
         if(error && !resolverErrorSync('gasto', g, error)) break;
         state.pendingGastos.shift();
         saveState();
       }
       while((state.pendingCompras||[]).length){
         const c = state.pendingCompras[0];
-        const { error } = await supabaseClient.from('compras_factura').insert({
+        const fila = {
           negocio_id: state.negocioId, numero: c.numero, proveedor: c.proveedor || null, fecha: c.fecha,
           uuid_fiscal: c.uuid || null, items: c.items, total: c.total
-        });
+        };
+        if(!sinLocalId) fila.local_id = c.id;
+        let { error } = await supabaseClient.from('compras_factura').insert(fila);
+        if(error && !sinLocalId && esErrorColumnaLocalId(error)){ sinLocalId = true; delete fila.local_id; ({ error } = await supabaseClient.from('compras_factura').insert(fila)); }
         if(error && !resolverErrorSync('compra', c, error)) break;     // 23505 = ya estaba en la nube
         state.pendingCompras.shift();
         saveState();
       }
+      while((state.pendingComprasCambios||[]).length && !sinEtapa4){           // anulaciones y correcciones de facturas
+        const c = state.pendingComprasCambios[0];
+        const r = c.tipo === 'anular'
+          ? await supabaseClient.rpc('anular_compra', { p_negocio: state.negocioId, p_local_id: c.id, p_por: c.por || '', p_motivo: c.motivo || '' })
+          : await supabaseClient.rpc('editar_compra', { p_negocio: state.negocioId, p_local_id: c.id, p_n: c.n, p_por: c.por || '', p_motivo: c.motivo || '', p_datos: c.datos });
+        if(r.error){
+          if(/PGRST202|42883|Could not find the function/i.test(String(r.error.message || '') + ' ' + String(r.error.code || ''))){ sinEtapa4 = true; break; }   // aún no se corre el SQL: queda pendiente
+          if(String(r.error.code || '') === '23505'){                                 // el folio fiscal nuevo ya es de otra factura: se aparta y no detiene lo demás
+            state.pendingErrores.push({ tipo:'factura', folio:c.numeroRef || '', mensaje:'La corrección no se pudo guardar en la nube: ' + String(r.error.message || ''), dato:c, fechaISO:new Date().toISOString() });
+            state.pendingComprasCambios.shift(); saveState(); continue;
+          }
+          if(!resolverErrorSync('compra', c, r.error)) break;
+        }
+        state.pendingComprasCambios.shift();
+        saveState();
+      }
+      if(extrasAntes > 0 && ((state.pendingGastos||[]).length + (state.pendingCompras||[]).length + (state.pendingComprasCambios||[]).length) < extrasAntes && multiActivo()) avisarCambioMulti();   // las demás máquinas lo piden en cuanto llega
       while(state.pendingCancelaciones.length){
         const c = state.pendingCancelaciones[0];
         const { error } = await supabaseClient.from('ventas').update({
@@ -1095,6 +1151,7 @@
         }).eq('negocio_id', state.negocioId).eq(esUuid(c.id) ? 'id' : 'folio', esUuid(c.id) ? c.id : c.folio);
         if(error) break;
         state.pendingCancelaciones.shift();
+        avisarCambioMulti();
         saveState();
       }
       if(state.snapshotDirty){
@@ -1300,6 +1357,7 @@
   }
   function aplicarModulos(){
     const visibles = { servicios: moduloActivo('servicios'), compras: moduloActivo('compras') };
+    if(!visibles.servicios && activeCategory === 'Servicios') activeCategory = 'Todas';          // si apagan el módulo, se sale de esa categoría
     Object.keys(visibles).forEach(m=>{
       document.querySelectorAll('.tab-item[data-tab="' + m + '"]').forEach(b=>{ b.hidden = !visibles[m]; });
     });
@@ -1310,6 +1368,7 @@
     if(typeof renderTurnoEstado === 'function') renderTurnoEstado();
     if(visibles.servicios && typeof renderServicios === 'function') renderServicios();
     if(visibles.compras && typeof renderCompras === 'function') renderCompras();
+    if(typeof renderCart === 'function') renderCart();                      // aparecen o desaparecen los precios editables
   }
   function iniciarModulos(){
     aplicarModulos();
@@ -1435,6 +1494,10 @@
   }
   // Un registro con datos que la nube rechaza (códigos 22xxx / 23xxx) se aparta para que NO frene a los demás.
   // Un error de conexión (u otro) detiene la ronda y se reintenta después. Un duplicado (23505) ya estaba en la nube.
+  var sinLocalId = false;                  // true si la nube todavía no tiene la columna local_id (aún no se corre el SQL de la etapa 3)
+  function esErrorColumnaLocalId(error){
+    return /local_id|PGRST204|42703/i.test(String(error && error.message || '') + ' ' + String(error && error.code || ''));
+  }
   function resolverErrorSync(tipo, dato, error){
     const codigo = String((error && error.code) || '');
     if(codigo === '23505') return true;
@@ -1520,6 +1583,7 @@
         <p style="margin:0;"><b>Ventas guardadas en este equipo:</b> ${state.ventasDesde ? 'desde el ' + escapeHTML(state.ventasDesde) : 'todo el historial'}</p>
         <p style="margin:0;"><b>Turno abierto en este equipo:</b> ${state.turnoActual ? 'sí, desde el ' + escapeHTML(new Date(state.turnoActual.fechaApertura).toLocaleString('es-MX')) : 'no'}</p>
         <p style="margin:0;"><b>Memoria usada del navegador:</b> ${Math.round(JSON.stringify(state).length/1024)} KB de unos 5,000</p>
+        ${multiActivo() ? `<p style="margin:0;"><b>Varias máquinas:</b> activo (${Number(state.numMaquinas)||2} máquinas) · esta es la <b>${escapeHTML(idMaquina())}</b> · última sincronización ${ultimaSincMulti ? escapeHTML(new Date(ultimaSincMulti).toLocaleTimeString('es-MX')) : 'todavía no'}${((state.pendingStock||[]).length + (state.pendingCatalogo||[]).length) > 0 ? ' · cambios sin enviar: ' + ((state.pendingStock||[]).length + (state.pendingCatalogo||[]).length) : ''}</p>` : ''}
         <p style="margin:0;"><b>Versión del POS:</b> ${escapeHTML(VERSION_APP)}</p>
       </div>`, `
       <button type="button" class="btn-ghost" data-action="comprobar-seguridad">Comprobar ahora</button>
@@ -1546,6 +1610,662 @@
       if(!/PGRST202|42883|Could not find the function/i.test(String(error.message || '') + String(error.code || ''))) return { data: null, error };
     }catch(e){ /* sin la función: se usa la consulta de siempre */ }
     return await supabaseClient.from('negocios_estatus_publico').select(columnas).ilike('codigo', codigo).maybeSingle();
+  }
+
+  // ---------- Varias máquinas (opción por negocio): folios consecutivos y ventas en vivo ----------
+  // Con la opción activa, todas las máquinas del negocio usan el mismo contador de folios (en Supabase) y se
+  // ven las ventas unas a otras en segundos. Un aviso en vivo ("timbre") le dice a las demás que algo cambió y
+  // cada una pide a Supabase solo lo nuevo. Si el aviso falla, cada 60 segundos se revisa de todos modos.
+  let canalMulti = null, timerMulti = null, ultimaSincMulti = 0, sincronizandoMulti = false, repetirSincMulti = false, esperaSincMulti = null;
+  let cobrandoMulti = false, folioSinUsar = null, folioReservado = null, multiIniciado = false;
+  function multiActivo(){ return !!state.multiAuto; }     // se activa SOLO cuando el negocio tiene 2 o más máquinas
+  function pausaMulti(ms){ return new Promise(r=> setTimeout(r, ms)); }
+  function idMaquina(){
+    if(!state.maquinaId){
+      const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let c = '';
+      for(let i=0; i<4; i++) c += abc[Math.floor(Math.random()*abc.length)];
+      state.maquinaId = c;
+      saveState();
+    }
+    return state.maquinaId;
+  }
+  // Folio consecutivo desde Supabase. Sin internet (o si tarda más de 3 s) sale un folio provisional con la letra
+  // de la máquina (por ejemplo K7-0003): no choca con ninguno y se queda así (el ticket impreso ya lo trae).
+  async function pedirFolioCentral(){
+    if(folioSinUsar){ const f = folioSinUsar; folioSinUsar = null; return f; }
+    if(cloudEnabled && state.negocioId && navigator.onLine){
+      try{
+        const r = await Promise.race([ supabaseClient.rpc('siguiente_folio', { p_negocio: state.negocioId }), pausaMulti(3000).then(()=> null) ]);
+        if(r && !r.error && r.data !== null && r.data !== undefined) return 'V-' + String(r.data).padStart(4, '0');
+      }catch(e){ /* sin conexión: folio provisional */ }
+    }
+    state.folioProvisional = (state.folioProvisional || 0) + 1;
+    saveState();
+    return idMaquina() + '-' + String(state.folioProvisional).padStart(4, '0');
+  }
+  async function cobrarConFolioCentral(){
+    if(cobrandoMulti) return;                 // evita cobrar dos veces si se toca el botón dos veces
+    cobrandoMulti = true;
+    try{
+      folioReservado = await pedirFolioCentral();
+      const antes = state.sales.length;
+      completarVentaLocal();
+      folioSinUsar = (state.sales.length === antes) ? folioReservado : null;   // si no se cobró, el folio se conserva para el siguiente intento
+    }finally{
+      folioReservado = null;
+      cobrandoMulti = false;
+    }
+  }
+  function completeSale(){
+    if(!multiActivo()) return completarVentaLocal();
+    return cobrarConFolioCentral();
+  }
+
+  // Ventas de las demás máquinas
+  function aplicarVentaRemota(v){
+    const existente = state.sales.find(s=> s.id === v.id);
+    if(!existente){
+      state.sales.push(ventaDeNube(v, false));
+      const mf = /^V-(\d+)$/.exec(v.folio || '');
+      if(mf) state.nextFolio = Math.max(state.nextFolio, parseInt(mf[1], 10) + 1);
+      return true;
+    }
+    if(v.cancelada && !existente.cancelada){
+      existente.cancelada = true;
+      existente.canceladaPor = v.cancelada_por || '';
+      existente.canceladaEn = v.cancelada_en || '';
+      return true;
+    }
+    return false;
+  }
+  async function inicializarSeqVentas(){
+    if(state.seqVentasListo || !cloudEnabled || !state.negocioId) return;       // solo se calcula UNA vez por equipo
+    try{
+      // Se deja un margen de 10 minutos para no saltarse ventas que otra máquina haya hecho justo al activarse el modo
+      const { data, error } = await supabaseClient.from('ventas').select('seq').eq('negocio_id', state.negocioId)
+        .lt('fecha_hora', new Date(Date.now() - 10*60*1000).toISOString()).order('seq', {ascending:false}).limit(1);
+      if(error || !data) return;
+      state.ultimoSeqVentas = (data[0] && Number(data[0].seq)) || 0;
+      state.seqVentasListo = true;
+      saveState();
+    }catch(e){ /* se reintenta en la próxima revisión */ }
+  }
+  async function sincronizarVentasMulti(){
+    if(!multiActivo() || !cloudEnabled || !state.negocioId || !navigator.onLine) return;
+    if(sincronizandoMulti){ repetirSincMulti = true; return; }
+    sincronizandoMulti = true;
+    try{
+      await inicializarSeqVentas();
+      let hayMas = true, cambio = false;
+      while(hayMas){
+        const { data, error } = await supabaseClient.from('ventas').select('*').eq('negocio_id', state.negocioId)
+          .gt('seq', state.ultimoSeqVentas || 0).order('seq', {ascending:true}).limit(500);
+        if(error || !data) break;
+        data.forEach(v=>{ if(aplicarVentaRemota(v)) cambio = true; });
+        if(data.length){ state.ultimoSeqVentas = Math.max(state.ultimoSeqVentas || 0, ...data.map(v=> Number(v.seq) || 0)); }
+        hayMas = data.length === 500;
+      }
+      ultimaSincMulti = Date.now();
+      if(cambio){
+        state.sales.sort((a,b)=> a.dateISO < b.dateISO ? -1 : (a.dateISO > b.dateISO ? 1 : 0));
+        saveState();
+        renderVentas();
+      }else{
+        saveState();
+      }
+    }catch(e){ /* sin conexión: se vuelve a intentar */ }
+    finally{
+      sincronizandoMulti = false;
+      if(repetirSincMulti){ repetirSincMulti = false; sincronizarVentasMulti(); }
+    }
+  }
+  function programarSincMulti(){
+    clearTimeout(esperaSincMulti);
+    esperaSincMulti = setTimeout(sincronizarMulti, 250);       // junta varios avisos seguidos en una sola revisión
+  }
+  function avisarCambioMulti(){
+    if(!canalMulti || !multiActivo()) return;
+    try{ canalMulti.send({ type:'broadcast', event:'cambio', payload:{ m: idMaquina() } }); }catch(e){ /* igual se revisa cada 60 s */ }
+  }
+  let canalListo = false, holaPendiente = false, sinDescubrimiento = false, descubrimientoIniciado = false;
+  function iniciarCanalMulti(){
+    if(canalMulti || !cloudEnabled || !state.negocioId || !supabaseClient || !supabaseClient.channel) return;
+    try{
+      canalMulti = supabaseClient.channel('oram-multi-' + state.negocioId, { config:{ broadcast:{ self:false } } });
+      canalMulti
+        .on('broadcast', { event:'cambio' }, ()=>{ if(multiActivo()) programarSincMulti(); })
+        .on('broadcast', { event:'hola' }, ()=>{ descubrirMaquinas(false); })      // llegó una máquina nueva: se vuelve a contar
+        .subscribe((estado)=>{
+          if(estado === 'SUBSCRIBED'){ canalListo = true; if(holaPendiente){ holaPendiente = false; anunciarMaquina(); } }
+        });
+    }catch(e){ canalMulti = null; }
+  }
+  function anunciarMaquina(){
+    if(!canalMulti) return;
+    if(!canalListo){ holaPendiente = true; return; }
+    try{ canalMulti.send({ type:'broadcast', event:'hola', payload:{ m: idMaquina() } }); }catch(e){ /* igual se cuenta cada 15 minutos */ }
+  }
+  // Cada máquina le dice a Supabase "aquí estoy" con el código del negocio. Si hay 2 o más, se activa solo
+  // el modo "varias máquinas"; si vuelve a haber una sola, se apaga solo.
+  async function descubrirMaquinas(anunciar){
+    if(!cloudEnabled || !state.negocioId || !navigator.onLine || sinDescubrimiento) return;
+    try{
+      const r = await supabaseClient.rpc('registrar_maquina', { p_negocio: state.negocioId, p_maquina: idMaquina() });
+      if(r && r.error){
+        if(/PGRST202|42883|Could not find the function/i.test(String(r.error.message || '') + String(r.error.code || ''))) sinDescubrimiento = true;   // aún no se corre el SQL: todo sigue como siempre
+        return;
+      }
+      const n = Math.max(1, Number(r && r.data) || 1);
+      const eraMulti = multiActivo(), eranMaquinas = state.numMaquinas;
+      state.numMaquinas = n;
+      state.multiAuto = n >= 2;
+      if(eraMulti !== multiActivo() || n !== eranMaquinas){ saveState(); }
+      if(eraMulti !== multiActivo()) aplicarMulti();
+      if(anunciar) anunciarMaquina();
+    }catch(e){ /* sin conexión: se vuelve a intentar */ }
+  }
+  function aplicarMulti(){ if(multiActivo()) iniciarMulti(); else pararMulti(); }
+  function arrancarMaquinas(){
+    if(!cloudEnabled || !state.negocioId) return;
+    idMaquina();
+    iniciarCanalMulti();                                  // siempre abierto: así se escuchan los "hola" de una máquina nueva
+    if(multiActivo()) iniciarMulti();
+    if(!descubrimientoIniciado){
+      descubrimientoIniciado = true;
+      setInterval(()=>{ descubrirMaquinas(false); }, 15*60*1000);
+    }
+    descubrirMaquinas(true);
+  }
+  function iniciarMulti(){
+    if(!cloudEnabled || !state.negocioId || !multiActivo()) return;
+    iniciarCanalMulti();
+    if(!multiIniciado){
+      multiIniciado = true;
+      timerMulti = setInterval(sincronizarMulti, 60000);
+    }
+    sincronizarMulti();
+  }
+  function pararMulti(){
+    if(timerMulti){ clearInterval(timerMulti); timerMulti = null; }
+    multiIniciado = false;
+  }
+  function detenerMulti(){
+    pararMulti();
+    if(canalMulti){ try{ supabaseClient.removeChannel(canalMulti); }catch(e){} canalMulti = null; canalListo = false; }
+  }
+  // ---------- Varias máquinas (etapa 2): precios, productos y existencias compartidos ----------
+  // Cada máquina recuerda lo último que sabe de la nube (precio/datos de cada producto y su existencia).
+  // Cuando algo cambia aquí, manda SOLO la diferencia ("cambió el precio de la Coca", "se vendieron 3"),
+  // así nadie pisa lo que hizo otra máquina. La existencia se suma y se resta en Supabase.
+  let sinCatalogoMulti = false, sincronizandoCatalogo = false, repetirCatalogo = false;
+  function ordenarClaves(o){
+    if(Array.isArray(o)) return o.map(ordenarClaves);
+    if(o && typeof o === 'object'){ const r = {}; Object.keys(o).sort().forEach(k=>{ r[k] = ordenarClaves(o[k]); }); return r; }
+    return o;
+  }
+  function datosCatalogo(p){ const d = JSON.parse(JSON.stringify(p)); delete d.stock; return d; }
+  function firmaDatos(d){ return JSON.stringify(ordenarClaves(d)); }
+  function pendienteStock(pid){ return r3((state.pendingStock||[]).filter(x=> x.p === pid).reduce((s,x)=> s + x.d, 0)); }
+  function marcarSinCatalogoSiFalta(error){
+    if(/PGRST202|42883|42P01|PGRST205|Could not find the (function|table)/i.test(String(error && error.message || '') + String(error && error.code || ''))) sinCatalogoMulti = true;   // aún no se corre el SQL de la etapa 2
+  }
+  // Compara lo que hay en esta máquina contra lo último que se sabe de la nube y anota las diferencias
+  function registrarCambiosCatalogoMulti(){
+    if(!state.catalogoMultiListo) return;
+    const base = state.catalogoMulti;
+    const vistos = new Set();
+    state.products.forEach(p=>{
+      vistos.add(p.id);
+      const d = datosCatalogo(p), firma = firmaDatos(d), b = base[p.id];
+      if(!b || b.eliminadoLocal){                                   // producto nuevo
+        const s = p.ilimitado ? 0 : (Number(p.stock) || 0);
+        state.pendingCatalogo.push({ p:p.id, d, s, e:false });
+        base[p.id] = { stock:s, firma, enNube:false };
+        return;
+      }
+      if(b.firma !== firma){                                        // cambió el precio, el nombre, etc.
+        state.pendingCatalogo.push({ p:p.id, d, s:0, e:false });
+        b.firma = firma;
+      }
+      if(!p.ilimitado){                                             // cambió la existencia (venta, cancelación, mercancía, ajuste)
+        const esperado = r3((Number(b.stock) || 0) + pendienteStock(p.id));
+        const delta = r3((Number(p.stock) || 0) - esperado);
+        if(delta !== 0) state.pendingStock.push({ p:p.id, d:delta });
+      }
+    });
+    Object.keys(base).forEach(pid=>{                                // producto borrado
+      if(!vistos.has(pid) && !base[pid].eliminadoLocal){
+        state.pendingCatalogo.push({ p:pid, d:null, s:0, e:true });
+        base[pid].eliminadoLocal = true;
+      }
+    });
+    saveState();
+  }
+  function aplicarFilaCatalogo(row){
+    const pid = row.producto_id, base = state.catalogoMulti;
+    const pendienteDatos = state.pendingCatalogo.some(x=> x.p === pid);      // si aquí hay un cambio sin enviar, ese gana
+    let p = state.products.find(x=> x.id === pid);
+    if(row.eliminado){
+      let cambio = false;
+      if(p && !pendienteDatos){ state.products = state.products.filter(x=> x.id !== pid); cambio = true; }
+      base[pid] = { stock:0, firma:'', enNube:true, eliminadoLocal:true };
+      return cambio;
+    }
+    const d = row.datos || {}, firma = firmaDatos(d);
+    let cambio = false;
+    if(!p){
+      p = Object.assign({}, d, { id:pid, stock:0 });
+      state.products.push(p);
+      cambio = true;
+    }else if(!pendienteDatos && (base[pid] || {}).firma !== firma){
+      Object.keys(p).forEach(k=>{ if(k !== 'stock' && !(k in d)) delete p[k]; });
+      Object.assign(p, d, { id:pid });
+      cambio = true;
+    }
+    const stockNube = Number(row.stock) || 0;
+    base[pid] = { stock:stockNube, firma: pendienteDatos ? ((base[pid] || {}).firma || firma) : firma, enNube:true };
+    if(!p.ilimitado){
+      const nuevo = r3(stockNube + pendienteStock(pid));
+      if(p.stock !== nuevo){ p.stock = nuevo; cambio = true; }
+    }
+    return cambio;
+  }
+  async function traerCatalogoMulti(){
+    let hayMas = true, cambio = false;
+    while(hayMas){
+      const { data, error } = await supabaseClient.from('catalogo_productos').select('*').eq('negocio_id', state.negocioId)
+        .gt('seq', state.ultimoSeqCatalogo || 0).order('seq', {ascending:true}).limit(500);
+      if(error){ marcarSinCatalogoSiFalta(error); return cambio; }
+      if(!data) break;
+      data.forEach(r=>{ if(aplicarFilaCatalogo(r)) cambio = true; });
+      if(data.length) state.ultimoSeqCatalogo = Math.max(state.ultimoSeqCatalogo || 0, ...data.map(r=> Number(r.seq) || 0));
+      hayMas = data.length === 500;
+    }
+    return cambio;
+  }
+  async function enviarCatalogoMulti(){
+    let envio = false;
+    const base = state.catalogoMulti;
+    while(state.pendingCatalogo.length){                            // 1) productos nuevos, cambios de precio/datos y borrados
+      const lote = state.pendingCatalogo.slice(0, 200);
+      const { error } = await supabaseClient.rpc('guardar_productos', { p_negocio: state.negocioId, p_lista: lote });
+      if(error){ marcarSinCatalogoSiFalta(error); return { ok:false, envio }; }
+      state.pendingCatalogo.splice(0, lote.length);
+      lote.forEach(x=>{ if(base[x.p]) base[x.p].enNube = true; });
+      envio = true;
+      saveState();
+    }
+    if(state.pendingStock.length){                                  // 2) existencias: se suman/restan en Supabase
+      const enviados = state.pendingStock.length, agrupado = {};
+      state.pendingStock.slice(0, enviados).forEach(x=>{ agrupado[x.p] = r3((agrupado[x.p] || 0) + x.d); });
+      const ajustes = Object.keys(agrupado).filter(pid=> agrupado[pid] !== 0).map(pid=>({ p:pid, d:agrupado[pid] }));
+      if(ajustes.length){
+        const { data, error } = await supabaseClient.rpc('ajustar_stocks', { p_negocio: state.negocioId, p_ajustes: ajustes });
+        if(error){ marcarSinCatalogoSiFalta(error); return { ok:false, envio }; }
+        state.pendingStock.splice(0, enviados);                     // solo se quitan los que se mandaron (pueden haber llegado más mientras tanto)
+        Object.keys(data || {}).forEach(pid=>{
+          const b = base[pid]; if(!b) return;
+          b.stock = Number(data[pid]);                              // la existencia que quedó en la nube (ya incluye lo de las demás máquinas)
+          const p = state.products.find(x=> x.id === pid);
+          if(p && !p.ilimitado) p.stock = r3(b.stock + pendienteStock(pid));
+        });
+        envio = true;
+      }else{
+        state.pendingStock.splice(0, enviados);
+      }
+      saveState();
+    }
+    return { ok:true, envio };
+  }
+  async function sincronizarCatalogoMulti(){
+    if(!multiActivo() || sinCatalogoMulti || !cloudEnabled || !state.negocioId || !navigator.onLine) return;
+    if(sincronizandoCatalogo){ repetirCatalogo = true; return; }
+    sincronizandoCatalogo = true;
+    let cambioLocal = false;
+    try{
+      if(!state.catalogoMultiListo){
+        // Primera vez en esta máquina: lo que ya hay en la nube manda; lo que solo existe aquí se sube (nada se pierde)
+        cambioLocal = await traerCatalogoMulti();
+        if(sinCatalogoMulti) return;
+        const base = state.catalogoMulti;
+        state.products.forEach(p=>{
+          if(base[p.id]) return;
+          const d = datosCatalogo(p), s = p.ilimitado ? 0 : (Number(p.stock) || 0);
+          state.pendingCatalogo.push({ p:p.id, d, s, e:false });
+          base[p.id] = { stock:s, firma:firmaDatos(d), enNube:false };
+        });
+        state.catalogoMultiListo = true;
+        saveState();
+      }
+      registrarCambiosCatalogoMulti();
+      const r = await enviarCatalogoMulti();
+      if(r.ok && await traerCatalogoMulti()) cambioLocal = true;
+      if(r.envio) avisarCambioMulti();
+      if(cambioLocal){
+        saveState();
+        renderInventory(); renderVenderGrid(); renderCategoryChips(); renderInventarioAdminList();
+      }
+    }catch(e){ /* sin conexión: se vuelve a intentar */ }
+    finally{
+      sincronizandoCatalogo = false;
+      if(repetirCatalogo){ repetirCatalogo = false; sincronizarCatalogoMulti(); }
+    }
+  }
+  // ---------- Varias máquinas (etapa 3): gastos de caja, facturas de compra y servicios compartidos ----------
+  // Gastos y facturas se registran una sola vez (no se editan): cada máquina pide a la nube "lo nuevo desde mi último número"
+  // y lo junta, sin repetir lo que ya tiene. Los servicios funcionan como el catálogo de productos (se manda solo lo que cambió).
+  // Así el corte de caja suma lo de todas las máquinas sin importar desde cuál se haga.
+  var sinExtrasMulti = false;               // true si la nube todavía no tiene lo de la etapa 3
+  let sincronizandoExtras = false, repetirExtras = false, guardandoCompra = false;
+  function marcarSinExtrasSiFalta(error){
+    if(/PGRST202|PGRST204|PGRST205|42703|42883|42P01|Could not find the|does not exist/i.test(String(error && error.message || '') + ' ' + String(error && error.code || ''))) sinExtrasMulti = true;
+  }
+  const tiempoDe = (iso)=>{ const t = new Date(iso).getTime(); return isNaN(t) ? 0 : t; };
+  function unirGastosNube(filas){
+    let cambio = false;
+    filas.forEach(r=>{
+      const clave = r.local_id || r.id;
+      if((state.gastosCaja||[]).some(g=> g.id === clave)) return;                   // ya lo tengo
+      const t = tiempoDe(r.fecha_hora);
+      if(state.gastosCaja.some(g=> g.turnoId === r.turno_id && g.concepto === r.concepto && Number(g.monto) === Number(r.monto) && Math.abs(tiempoDe(g.fechaISO) - t) < 1500)) return;   // el mismo gasto, de antes de esta versión
+      state.gastosCaja.push({ id:clave, turnoId:r.turno_id, cajero:r.cajero || '', concepto:r.concepto, monto:Number(r.monto) || 0, fechaISO:r.fecha_hora });
+      cambio = true;
+    });
+    if(cambio){
+      state.gastosCaja.sort((a,b)=> tiempoDe(a.fechaISO) - tiempoDe(b.fechaISO));
+      if(state.gastosCaja.length > 300) state.gastosCaja = state.gastosCaja.slice(-300);
+    }
+    return cambio;
+  }
+  function unirComprasNube(filas){
+    const firma = (f)=> [String(f.numero||'').toLowerCase(), String(f.proveedor||'').toLowerCase(), f.fecha, Math.round((Number(f.total)||0) * 100)].join('|');
+    let cambio = false;
+    filas.forEach(r=>{
+      const clave = r.local_id || r.id;
+      const existente = state.compras.find(c=> c.id === clave);
+      if(existente){
+        // ya la tengo: se actualiza solo si en otra máquina la anularon o la corrigieron
+        if((state.pendingComprasCambios || []).some(x=> x.id === clave)) return;        // si aquí hay un cambio sin enviar, ese gana
+        const nueva = compraDesdeFila(r);
+        if((nueva.anulada && !existente.anulada) || (nueva.ediciones || 0) > (existente.ediciones || 0)){
+          state.compras[state.compras.indexOf(existente)] = nueva;
+          cambio = true;
+        }
+        return;
+      }
+      if(!r.anulada){                                                                   // (una factura anulada no cuenta como "repetida")
+        const uuid = String(r.uuid_fiscal || '').toLowerCase();
+        if(uuid && state.compras.some(c=> !c.anulada && String(c.uuid||'').toLowerCase() === uuid)) return;
+        const fr = firma({ numero:r.numero, proveedor:r.proveedor, fecha:r.fecha, total:r.total });
+        if(state.compras.some(c=> !c.anulada && firma(c) === fr)) return;               // la misma factura, de antes de esta versión
+      }
+      state.compras.push(compraDesdeFila(r));
+      cambio = true;
+    });
+    if(cambio){
+      state.compras.sort((a,b)=> String(b.creadaISO || '').localeCompare(String(a.creadaISO || '')));
+      recortarComprasLocales();
+    }
+    return cambio;
+  }
+  // Pide a la nube lo posterior al último número que esta máquina ya tiene. La primera vez, junta lo reciente.
+  async function traerExtraPorSeq(tabla, claveSeq, claveListo, consultaInicial, unir){
+    let cambio = false;
+    if(!state[claveListo]){
+      const { data:tope, error:e0 } = await supabaseClient.from(tabla).select('seq').eq('negocio_id', state.negocioId).order('seq', {ascending:false}).limit(1);
+      if(e0){ marcarSinExtrasSiFalta(e0); return false; }
+      const { data, error } = await consultaInicial();
+      if(error){ marcarSinExtrasSiFalta(error); return false; }
+      if(data && unir(data)) cambio = true;
+      state[claveSeq] = (tope && tope[0]) ? (Number(tope[0].seq) || 0) : 0;
+      state[claveListo] = true;
+      saveState();
+      return cambio;
+    }
+    let hayMas = true;
+    while(hayMas){
+      const { data, error } = await supabaseClient.from(tabla).select('*').eq('negocio_id', state.negocioId)
+        .gt('seq', state[claveSeq] || 0).order('seq', {ascending:true}).limit(500);
+      if(error){ marcarSinExtrasSiFalta(error); break; }
+      if(!data || !data.length) break;
+      if(unir(data)) cambio = true;
+      state[claveSeq] = Math.max(state[claveSeq] || 0, ...data.map(r=> Number(r.seq) || 0));
+      hayMas = data.length === 500;
+    }
+    saveState();
+    return cambio;
+  }
+  async function traerGastosMulti(){
+    const desde = new Date(Date.now() - 60 * 86400000).toISOString();
+    const cambio = await traerExtraPorSeq('gastos_caja', 'ultimoSeqGastos', 'seqGastosListo',
+      ()=> supabaseClient.from('gastos_caja').select('*').eq('negocio_id', state.negocioId).gte('fecha_hora', desde).order('fecha_hora', {ascending:true}).limit(1000),
+      unirGastosNube);
+    if(cambio){ saveState(); renderTurnoEstado(); }
+    return cambio;
+  }
+  async function traerComprasMulti(){
+    const cambio = await traerExtraPorSeq('compras_factura', 'ultimoSeqCompras', 'seqComprasListo',
+      ()=> supabaseClient.from('compras_factura').select('*').eq('negocio_id', state.negocioId).order('created_at', {ascending:false}).limit(COMPRAS_LOCALES_MAX),
+      unirComprasNube);
+    if(cambio){ saveState(); if(typeof renderCompras === 'function') renderCompras(); }
+    return cambio;
+  }
+  // ----- servicios (catálogo compartido, igual que los productos)
+  function registrarCambiosServiciosMulti(){
+    if(!state.serviciosMultiListo) return;
+    const base = state.serviciosMulti, vistos = new Set();
+    (state.servicios || []).forEach(sv=>{
+      vistos.add(sv.id);
+      const d = JSON.parse(JSON.stringify(sv)), firma = firmaDatos(d), b = base[sv.id];
+      if(!b || b.eliminadoLocal){ state.pendingServicios.push({ p:sv.id, d, e:false }); base[sv.id] = { firma, enNube:false }; return; }
+      if(b.firma !== firma){ state.pendingServicios.push({ p:sv.id, d, e:false }); b.firma = firma; }
+    });
+    Object.keys(base).forEach(id=>{
+      if(!vistos.has(id) && !base[id].eliminadoLocal){ state.pendingServicios.push({ p:id, d:null, e:true }); base[id].eliminadoLocal = true; }
+    });
+    saveState();
+  }
+  function aplicarFilaServicio(row){
+    const id = row.servicio_id, base = state.serviciosMulti;
+    const pendiente = state.pendingServicios.some(x=> x.p === id);                  // si aquí hay un cambio sin enviar, ese gana
+    const sv = (state.servicios || []).find(x=> x.id === id);
+    if(row.eliminado){
+      let cambio = false;
+      if(sv && !pendiente){ state.servicios = state.servicios.filter(x=> x.id !== id); cambio = true; }
+      base[id] = { firma:'', enNube:true, eliminadoLocal:true };
+      return cambio;
+    }
+    const d = row.datos || {}, firma = firmaDatos(d);
+    let cambio = false;
+    if(!sv){ state.servicios.push(Object.assign({}, d, { id })); cambio = true; }
+    else if(!pendiente && (base[id] || {}).firma !== firma){ Object.keys(sv).forEach(k=>{ delete sv[k]; }); Object.assign(sv, d, { id }); cambio = true; }
+    base[id] = { firma: pendiente ? ((base[id] || {}).firma || firma) : firma, enNube:true };
+    return cambio;
+  }
+  async function traerServiciosMulti(){
+    let hayMas = true, cambio = false;
+    while(hayMas){
+      const { data, error } = await supabaseClient.from('catalogo_servicios').select('*').eq('negocio_id', state.negocioId)
+        .gt('seq', state.ultimoSeqServicios || 0).order('seq', {ascending:true}).limit(500);
+      if(error){ marcarSinExtrasSiFalta(error); return cambio; }
+      if(!data || !data.length) break;
+      data.forEach(r=>{ if(aplicarFilaServicio(r)) cambio = true; });
+      state.ultimoSeqServicios = Math.max(state.ultimoSeqServicios || 0, ...data.map(r=> Number(r.seq) || 0));
+      hayMas = data.length === 500;
+    }
+    return cambio;
+  }
+  async function sincronizarServiciosMulti(){
+    let cambioLocal = false;
+    if(!state.serviciosMultiListo){
+      // Primera vez en esta máquina: lo que ya hay en la nube manda; lo que solo existe aquí se sube (nada se pierde)
+      cambioLocal = await traerServiciosMulti();
+      if(sinExtrasMulti) return;
+      (state.servicios || []).forEach(sv=>{
+        if(state.serviciosMulti[sv.id]) return;
+        const d = JSON.parse(JSON.stringify(sv));
+        state.pendingServicios.push({ p:sv.id, d, e:false });
+        state.serviciosMulti[sv.id] = { firma:firmaDatos(d), enNube:false };
+      });
+      state.serviciosMultiListo = true;
+      saveState();
+    }
+    registrarCambiosServiciosMulti();
+    let envio = false;
+    while(state.pendingServicios.length){
+      const lote = state.pendingServicios.slice(0, 200);
+      const { error } = await supabaseClient.rpc('guardar_servicios', { p_negocio: state.negocioId, p_lista: lote });
+      if(error){ marcarSinExtrasSiFalta(error); break; }
+      state.pendingServicios.splice(0, lote.length);
+      lote.forEach(x=>{ if(state.serviciosMulti[x.p]) state.serviciosMulti[x.p].enNube = true; });
+      envio = true;
+      saveState();
+    }
+    if(!state.pendingServicios.length && await traerServiciosMulti()) cambioLocal = true;
+    if(envio) avisarCambioMulti();
+    if(cambioLocal){ saveState(); renderServicios(); renderVenderGrid(); renderCategoryChips(); }
+  }
+  async function sincronizarExtrasMulti(){
+    if(!multiActivo() || sinExtrasMulti || !cloudEnabled || !state.negocioId || !navigator.onLine) return;
+    if(sincronizandoExtras){ repetirExtras = true; return; }
+    sincronizandoExtras = true;
+    try{
+      if(moduloActivo('gastos')) await traerGastosMulti();
+      if(moduloActivo('compras')) await traerComprasMulti();
+      if(moduloActivo('servicios')) await sincronizarServiciosMulti();
+    }catch(e){ /* sin conexión: se vuelve a intentar */ }
+    finally{
+      sincronizandoExtras = false;
+      if(repetirExtras){ repetirExtras = false; sincronizarExtrasMulti(); }
+    }
+  }
+  async function sincronizarMulti(){
+    await sincronizarVentasMulti();
+    await sincronizarCatalogoMulti();
+    await sincronizarExtrasMulti();
+  }
+  window.addEventListener('focus', ()=>{ if(multiActivo()) sincronizarMulti(); });
+  window.addEventListener('online', ()=>{ descubrirMaquinas(false); if(multiActivo()) sincronizarMulti(); });
+
+  // ---------- Escanear en cualquier campo de código ----------
+  // Un campo marcado con data-escaneo recibe lo que se escanee (pistola USB o celular) en lugar de mandarlo a la venta:
+  //   data-escaneo="codigo"   → el código se escribe en el campo (y avisa si ya pertenece a otro producto)
+  //   data-escaneo="producto" → es un buscador de productos: se selecciona el producto de ese código
+  let ultimoCampoEscaneo = null;
+  document.addEventListener('focusin', (e)=>{ const t = e.target; if(t && t.dataset && t.dataset.escaneo) ultimoCampoEscaneo = t; });
+  function campoEscaneoDestino(){
+    const activo = document.activeElement;
+    if(activo && activo.dataset && activo.dataset.escaneo && activo.isConnected && !activo.disabled) return activo;
+    const modal = document.querySelector('#modalRoot .modal');
+    if(!modal) return null;
+    const campos = Array.from(modal.querySelectorAll('[data-escaneo]')).filter(c=> !c.disabled);
+    if(!campos.length) return null;
+    const vacio = campos.find(c=> !c.value);
+    if(vacio) return vacio;
+    if(campos.length === 1 && campos[0].dataset.escaneoUnico) return campos[0];      // p. ej. "Recibir mercancía": un solo campo y ya trae un producto escogido
+    return (ultimoCampoEscaneo && modal.contains(ultimoCampoEscaneo)) ? ultimoCampoEscaneo : null;
+  }
+  function codigosDeProducto(p){
+    return [p.sku].concat((p.paquetes||[]).map(pk=> pk.sku)).filter(Boolean).map(x=> String(x).trim().toLowerCase()).join('|');
+  }
+  function escaneoRapidoEnCurso(){
+    const n = scanBuffer.length;
+    const promedio = n > 1 ? (scanLastTime - scanFirstTime) / (n - 1) : Infinity;
+    return n >= 4 && promedio <= SCAN_MAX_AVG_MS;
+  }
+  function aplicarEscaneoACampo(campo, codigo){
+    if(campo.dataset.escaneo === 'producto' && campo._buscador){ campo._buscador.elegirPorCodigo(codigo); return; }
+    campo.value = codigo;
+    campo.dispatchEvent(new Event('input', {bubbles:true}));
+    campo.dispatchEvent(new Event('change', {bubbles:true}));
+    const excluir = campo.dataset.excluir || '';
+    const cod = codigo.toLowerCase();
+    const existente = state.products.find(p=> p.id !== excluir && codigosDeProducto(p).split('|').includes(cod));
+    showToast(existente ? 'Código escaneado: ' + codigo + '. Ojo: ya pertenece a «' + existente.name + '».' : 'Código escaneado: ' + codigo, existente ? 'warn' : 'success');
+  }
+
+  // ---------- Buscador de productos (reemplaza las listas largas) ----------
+  // Se ve toda la lista al tocarlo, y también se puede escribir (por nombre o por código) o escanear el código.
+  function activarBuscadores(raiz){
+    Array.from((raiz || document).querySelectorAll('select[data-buscable]')).forEach(sel=>{ if(!sel._buscador) crearBuscador(sel); });
+  }
+  function crearBuscador(sel){
+    const envoltura = document.createElement('div');
+    envoltura.className = 'buscador-prod';
+    const entrada = document.createElement('input');
+    entrada.type = 'text'; entrada.autocomplete = 'off'; entrada.className = 'buscador-prod-input';
+    entrada.placeholder = 'Escribe o escanea para buscar…';
+    entrada.dataset.escaneo = 'producto';
+    if(sel.dataset.siguiente) entrada.dataset.escaneoUnico = '1';
+    entrada.setAttribute('aria-label', 'Buscar producto');
+    if(sel.disabled) entrada.disabled = true;
+    const lista = document.createElement('div');
+    lista.className = 'buscador-prod-lista'; lista.hidden = true;
+    sel.parentNode.insertBefore(envoltura, sel);
+    envoltura.appendChild(entrada); envoltura.appendChild(lista); envoltura.appendChild(sel);
+    sel.style.display = 'none'; sel.tabIndex = -1;
+    let items = [], activo = -1, recienEnfocado = false;
+    const etiqueta = ()=>{ const o = sel.options[sel.selectedIndex]; return (o && o.value !== '') ? o.text : ''; };
+    const opciones = ()=> Array.from(sel.options).filter(o=> o.value !== '');
+    function dibujar(q){
+      const nq = normalizarBusqueda(q || '');
+      items = opciones().filter(o=> !nq || normalizarBusqueda(o.text + ' ' + (o.dataset.sku || '')).includes(nq));
+      activo = items.length ? 0 : -1;
+      lista.innerHTML = items.map((o,i)=>`<div class="buscador-prod-item${i===activo?' activo':''}${o.value===sel.value?' elegido':''}" data-v="${escapeHTML(o.value)}" role="option">${escapeHTML(o.text)}</div>`).join('')
+        || '<div class="buscador-prod-vacio">Sin coincidencias</div>';
+      lista.hidden = false;
+    }
+    function resaltar(){ Array.from(lista.querySelectorAll('.buscador-prod-item')).forEach((el,i)=>{ el.classList.toggle('activo', i === activo); if(i === activo && el.scrollIntoView) el.scrollIntoView({block:'nearest'}); }); }
+    function ocultar(){ lista.hidden = true; }
+    function elegir(valor){
+      sel.value = valor;
+      sel.dispatchEvent(new Event('change', {bubbles:true}));
+      entrada.value = etiqueta();
+      ocultar();
+      const sig = (sel.dataset.siguiente && sel.form) ? sel.form.elements[sel.dataset.siguiente] : null;
+      if(sig && sig.focus) sig.focus();                              // después de escoger el producto, el cursor pasa a la cantidad
+    }
+    function porCodigo(codigo){
+      const c = String(codigo || '').trim().toLowerCase();
+      if(c.length < 2) return null;
+      return opciones().find(o=> (o.dataset.sku || '').split('|').includes(c)) || null;
+    }
+    entrada.addEventListener('focus', ()=>{ recienEnfocado = true; dibujar(''); setTimeout(()=>{ try{ entrada.select(); }catch(_){} }, 0); });
+    entrada.addEventListener('mouseup', (e)=>{ if(recienEnfocado){ e.preventDefault(); recienEnfocado = false; } });
+    entrada.addEventListener('input', ()=> dibujar(entrada.value));
+    entrada.addEventListener('keydown', (e)=>{
+      if(e.key === 'ArrowDown'){ e.preventDefault(); if(lista.hidden) dibujar(entrada.value); else if(items.length){ activo = Math.min(items.length - 1, activo + 1); resaltar(); } }
+      else if(e.key === 'ArrowUp'){ e.preventDefault(); if(items.length){ activo = Math.max(0, activo - 1); resaltar(); } }
+      else if(e.key === 'Escape'){ e.stopPropagation(); ocultar(); entrada.value = etiqueta(); }
+      else if(e.key === 'Enter'){
+        e.preventDefault();                                          // Enter aquí nunca guarda el formulario
+        if(escaneoRapidoEnCurso()) return;                           // si es la pistola, lo resuelve el escaneo por código
+        const q = entrada.value.trim();
+        const exacto = porCodigo(q);
+        if(exacto) elegir(exacto.value);
+        else if(items[activo]) elegir(items[activo].value);
+        else showToast('No hay productos que coincidan con «' + q + '».', 'warn');
+      }
+    });
+    entrada.addEventListener('blur', ()=>{ setTimeout(()=>{ ocultar(); entrada.value = etiqueta(); }, 120); });
+    lista.addEventListener('mousedown', (e)=>{                       // mousedown (no click) para que el campo no pierda el foco antes de elegir
+      e.preventDefault();
+      const it = e.target.closest ? e.target.closest('.buscador-prod-item') : null;
+      if(it) elegir(it.dataset.v);
+    });
+    sel.addEventListener('change', ()=>{ if(document.activeElement !== entrada) entrada.value = etiqueta(); });
+    entrada.value = etiqueta();
+    const api = {
+      elegirPorCodigo(codigo){
+        const o = porCodigo(codigo);
+        if(o){ elegir(o.value); showToast('Producto: ' + o.text.replace(/\s*\(.*\)\s*$/, ''), 'success'); return true; }
+        showToast('Código sin coincidencia: ' + codigo + ' (ese producto no está dado de alta).', 'warn');
+        entrada.value = etiqueta(); ocultar();
+        return false;
+      }
+    };
+    entrada._buscador = api; sel._buscador = api;
   }
 
   const STOCK_ILIMITADO = 999999999;
@@ -1660,12 +2380,14 @@
     });
     return Math.max(0, minimo);
   }
-  function costoServicio(s){
-    const materiales = (s.materiales||[]).reduce((sum,m)=>{
+  function costoMaterialesServicio(s){
+    return (s.materiales||[]).reduce((sum,m)=>{
       const p = state.products.find(x=> x.id === m.productId);
       return sum + (p ? (Number(p.cost)||0) * (Number(m.cantidad)||0) : 0);
     }, 0);
-    return r2(materiales + (Number(s.manoObra)||0));
+  }
+  function costoServicio(s){
+    return r2(costoMaterialesServicio(s) + (Number(s.manoObra)||0));
   }
   function materialQueFalta(s, veces){
     for(const m of (s.materiales||[])){
@@ -1742,7 +2464,7 @@
   function desgloseLinea(c){
     const partes = [];
     let restante = c.qty;
-    if(!c.esPaquete && !c.esServicio){
+    if(!c.esPaquete && !c.esServicio && !c.precioManual){
       const base = state.products.find(x=>x.id===(c.baseId||c.productId));
       if(base){
         promosActivas(base).forEach(pr=>{
@@ -1776,11 +2498,15 @@
       }else{
         const falta = materialQueFalta(s, 1);
         if(falta){ showToast('Falta material para ' + s.nombre + ': ' + falta + '.', 'warn'); return; }
-        cart.push({ productId:s.id, baseId:s.id, name:s.nombre, price:Number(s.precio), cost:costoServicio(s), qty:1, piezas:1, esServicio:true,
-          consumo:(s.materiales||[]).map(m=>({ productId:m.productId, cantidad:Number(m.cantidad) })) });
+        if(s.precioVariable){ pedirPrecioServicio(s); return; }          // servicio de precio variable: se pregunta el precio
+        cart.push(lineaDeServicio(s, 1));
       }
       renderCart();
       renderVenderGrid();
+      if(!(Number(s.precio) > 0) && !s.precioVariable){                    // servicio sin precio fijo: el cursor queda en el precio para escribirlo
+        const campo = document.querySelector('#cartItems [data-precio-servicio="' + s.id + '"]');
+        if(campo){ campo.focus(); if(campo.select) campo.select(); }
+      }
       return;
     }
     if(v.tipo==='producto' && v.base.porMonto){ openMontoModal(v.base.id); return; }
@@ -1792,7 +2518,7 @@
     }else{
       const libres = v.base.ilimitado ? Infinity : v.base.stock - piezasEnCarrito(v.base.id, null);
       if(libres < v.piezas){ showToast(`No hay existencia suficiente de ${v.nombre}.`, 'warn'); return; }
-      cart.push({ productId:v.id, baseId:v.base.id, name:v.nombre, price:v.precio, cost:(v.base.cost||0)*v.piezas,
+      cart.push({ productId:v.id, baseId:v.base.id, name:v.nombre, price:v.precio, precioLista:v.precio, cost:(v.base.cost||0)*v.piezas,
         qty:1, piezas:v.piezas, esPaquete: v.tipo==='paquete' });
     }
     renderCart();
@@ -1848,7 +2574,7 @@
     if(!(monto>0)){ showToast('Captura cuánto vas a cobrar.', 'warn'); return; }
     const libres = piezasLibresDeProducto(p);
     if(n > libres){ showToast(`Solo hay ${libres} piezas disponibles de ${p.name}.`, 'warn'); return; }
-    cart.push({ productId: uid('m_'), baseId: p.id, name: `${p.name} · ${n} ${n===1?'pza':'pzas'}`, price: monto,
+    cart.push({ productId: uid('m_'), baseId: p.id, name: `${p.name} · ${n} ${n===1?'pza':'pzas'}`, price: monto, precioLista: monto,
       cost: (p.cost||0)*n, qty:1, piezas:n, esPaquete:true, esMonto:true });
     closeModal();
     renderCart();
@@ -1885,7 +2611,7 @@
     renderCartSummary();
   }
 
-  function completeSale(){
+  function completarVentaLocal(){
     if(bloqueadoPorSuspension()) return;
     if(cloudEnabled && !state.turnoActual){
       showToast('Abre un turno de caja antes de vender.', 'warn');
@@ -1893,6 +2619,8 @@
       return;
     }
     if(cart.length===0){ showToast('Agrega al menos un producto para cobrar.', 'warn'); return; }
+    if(cart.some(c=> c.esServicio && !(Number(c.price) > 0))){ showToast('Escribe el precio de cada servicio (mayor a $0).', 'warn'); return; }
+    if(cart.some(c=> !c.esServicio && c.precioInvalido)){ showToast('Revisa el precio escrito: debe ser mayor a $0.', 'warn'); return; }
     if(!selectedMethod){ showToast('Selecciona un método de pago.', 'warn'); return; }
     const subtotal = cartTotal();
     const total = totalConDescuento();
@@ -1938,11 +2666,17 @@
     cart.forEach(c=>{
       desgloseLinea(c).forEach(pt=>{
         const it = { productId:(c.baseId||c.productId), name:pt.nombre, qty:pt.qty, price:pt.price, cost:pt.cost||0, piezas:pt.piezas };
-        if(c.esServicio){ it.esServicio = true; it.consumo = c.consumo; }
+        if(c.esServicio){
+          it.esServicio = true; it.consumo = c.consumo;
+          it.precioLista = c.precioLista; it.manoObra = c.manoObra; it.manoObraLista = c.manoObraLista;
+          if(c.ajustado) it.ajustado = true;
+        }else if(c.ajustado){
+          it.ajustado = true; it.precioLista = c.precioLista;                 // producto con el precio cambiado al vender
+        }
         itemsVenta.push(it);
       });
     });
-    const folio = 'V-' + String(state.nextFolio).padStart(4,'0');
+    const folio = folioReservado || ('V-' + String(state.nextFolio).padStart(4,'0'));
     const facturaSolicitada = state.facturacionHabilitada && quiereFactura;
     const huboTransferencia = selectedMethod==='transferencia' || (selectedMethod==='mixto' && Number(pagoMixtoDraft.transferencia)>0);
     state.sales.push({
@@ -1956,9 +2690,14 @@
       cuentaTransferencia: huboTransferencia ? (cuentaTransferenciaSeleccionada || null) : null,
       cancelada: false
     });
-    state.nextFolio++;
+    if(!folioReservado){ state.nextFolio++; }
+    else{ const mf = /^V-(\d+)$/.exec(folioReservado); if(mf) state.nextFolio = Math.max(state.nextFolio, parseInt(mf[1],10) + 1); }
     saveState();
     const savedSale = state.sales[state.sales.length-1];
+    savedSale.items.filter(i=> i.ajustado).forEach(i=>{
+      logEvento('precio_ajustado', { folio:savedSale.folio, articulo:i.name, esServicio:!!i.esServicio, precioLista:i.precioLista, precioCobrado:i.price, manoObraLista:i.manoObraLista, manoObra:i.manoObra },
+        state.turnoActual ? state.turnoActual.cajeroApertura : '');
+    });
     queueVenta(savedSale);
     markSnapshotDirty();
     clearCart();
@@ -1978,11 +2717,13 @@
   function renderCategoryChips(){
     const el = document.getElementById('categoryChips');
     if(!el) return;
-    let cats = Array.from(new Set(state.products.map(p=>p.category))).sort();
-    if(moduloActivo('servicios') && (state.servicios||[]).length && !cats.includes('Servicios')) cats.push('Servicios');
-    // La categoría elegida va justo después de "Todas" para que siempre se vea cuál filtro está activo
-    const resto = cats.filter(c=> c !== activeCategory);
-    const all = ['Todas', ...(activeCategory !== 'Todas' ? [activeCategory] : []), ...resto];
+    const conServicios = moduloActivo('servicios');
+    const cats = Array.from(new Set(state.products.map(p=>p.category))).filter(c=> !(conServicios && c === 'Servicios')).sort();
+    // Con el módulo de Servicios activo, "Servicios" va SIEMPRE junto a "Todas" (haya o no servicios dados de alta).
+    // Después, la categoría elegida (para que siempre se vea cuál filtro está activo) y las demás.
+    const fijas = ['Todas', ...(conServicios ? ['Servicios'] : [])];
+    const elegida = fijas.includes(activeCategory) ? [] : [activeCategory];
+    const all = [...fijas, ...elegida, ...cats.filter(c=> c !== activeCategory)];
     el.innerHTML = all.map(c=>`<button type="button" class="chip ${activeCategory===c?'active':''}" data-action="category-chip" data-cat="${escapeHTML(c)}">${escapeHTML(c)}</button>`).join('');
     el.classList.toggle('abierto', categoriasAbiertas);
     actualizarFlechaCategorias();
@@ -2037,7 +2778,12 @@
       return matchesCat && matchesQ;
     });
     if(list.length===0){
-      grid.innerHTML = `<div class="empty-state"><p>No hay productos que coincidan con la búsqueda.</p></div>`;
+      if(activeCategory === 'Servicios' && moduloActivo('servicios') && !q){
+        grid.innerHTML = `<div class="empty-state"><p>Aún no hay servicios dados de alta.</p>
+          <button type="button" class="btn-primary" data-action="switch-tab" data-tab="servicios" style="margin-top:10px;">Ir a Servicios</button></div>`;
+      }else{
+        grid.innerHTML = `<div class="empty-state"><p>No hay productos que coincidan con la búsqueda.</p></div>`;
+      }
       return;
     }
     grid.innerHTML = list.map(v=>{
@@ -2050,7 +2796,7 @@
             <span class="product-row-meta">Servicio${(s.materiales||[]).length ? ' · ' + (s.materiales||[]).length + ' material(es)' : ''}</span>
           </div>
           <span class="stock-pill stock-${disp<=0?'out':'ok'}">${disp<=0 ? 'Falta material' : 'Servicio'}</span>
-          <span class="product-row-price">${formatMoney(v.precio)}</span>
+          <span class="product-row-price">${s.precioVariable ? 'Precio variable' : (Number(v.precio) > 0 ? formatMoney(v.precio) : 'Precio libre')}</span>
         </button>`;
       }
       const p = v.base;
@@ -2097,7 +2843,9 @@
           <span class="qty-value">${item.qty}</span>
           <button type="button" class="qty-btn" data-action="cart-inc" data-id="${item.productId}" aria-label="Agregar una unidad de ${escapeHTML(item.name)}">+</button>
         </div>
-        <div class="cart-row-subtotal">${formatMoney(totalItem)}</div>
+        <div class="cart-row-subtotal">${puedeEditarPrecio(item)
+          ? `<span class="subtotal-edit">$<input class="precio-inline total${(item.esServicio ? !(item.price > 0) : item.precioInvalido) ? ' invalido' : ''}" type="number" min="0" step="0.01" inputmode="decimal" value="${r2(totalItem)}" data-precio-servicio="${escapeHTML(item.productId)}" aria-label="Precio de ${escapeHTML(item.name)}" /></span>`
+          : formatMoney(totalItem)}</div>
         <button type="button" class="cart-row-remove" data-action="cart-remove" data-id="${item.productId}" aria-label="Eliminar ${escapeHTML(item.name)} de la venta">×</button>
       </div>
     `;}).join('');
@@ -2332,6 +3080,7 @@
         <div class="modal-footer">${footerHTML}</div>
       </div>
     </div>`;
+    activarBuscadores(root);                      // las listas largas de productos se vuelven buscadores (escribir, escanear o ver todo)
   }
   function closeModal(){ document.getElementById('modalRoot').innerHTML = ''; }
 
@@ -2355,12 +3104,13 @@
       }).join(', ') || '—';
       return `<tr>
         <td>${escapeHTML(s.nombre)}</td>
-        <td class="num">${formatMoney(s.precio)}</td>
+        <td class="num">${s.precioVariable ? 'Variable' + (Number(s.precio) > 0 ? '<br><span style="font-size:.74rem;">sug. ' + formatMoney(s.precio) + '</span>' : '') : (Number(s.precio) > 0 ? formatMoney(s.precio) : 'Sin precio fijo')}</td>
         <td style="font-size:.82rem;">${mats}</td>
         <td class="num">${formatMoney(s.manoObra||0)}</td>
         <td class="num">${formatMoney(costo)}</td>
         <td class="num" style="color:${ganancia<0?'var(--red)':'inherit'};">${formatMoney(ganancia)}</td>
         <td class="row-actions">
+          <button type="button" class="btn-primary btn-sm" data-action="servicio-vender" data-id="${s.id}">Vender</button>
           <button type="button" class="link-btn" data-action="servicio-ver" data-id="${s.id}">Ver</button>
           <button type="button" class="link-btn" data-action="servicio-editar" data-id="${s.id}">Editar</button>
           <button type="button" class="link-btn danger" data-action="servicio-eliminar" data-id="${s.id}">Eliminar</button>
@@ -2368,6 +3118,244 @@
       </tr>`;
     }).join('');
   }
+  // ---------- Servicios: vender directo desde la pestaña (sin buscarlo en Vender) ----------
+  let ventaRapida = null;
+  function lineaDeServicio(s, qty, precio, manoObra){
+    const precioLista = Number(s.precio) || 0, manoObraLista = Number(s.manoObra) || 0;
+    const p = (precio === undefined || precio === null) ? precioLista : Number(precio);
+    const mo = (manoObra === undefined || manoObra === null) ? manoObraLista : Number(manoObra);
+    return { productId:s.id, baseId:s.id, name:s.nombre, price:p, cost:r2(costoMaterialesServicio(s) + mo), qty, piezas:1, esServicio:true,
+      precioLista, manoObraLista, manoObra:mo, ajustado: precioLista > 0 && (Math.abs(p - precioLista) > 0.005 || Math.abs(mo - manoObraLista) > 0.005),
+      consumo:(s.materiales||[]).map(m=>({ productId:m.productId, cantidad:Number(m.cantidad) })) };
+  }
+  // ---------- Servicios: cambiar el precio o la mano de obra al venderlo (queda registrado) ----------
+  // Un servicio siempre tiene su precio editable; un producto normal solo si el negocio tiene el módulo "Precios editables"
+  function puedeEditarPrecio(c){ return !!c.esServicio || moduloActivo('precios'); }
+  function lineaEditablePorId(id){ return cart.find(c=> c.productId === id && puedeEditarPrecio(c)); }
+  function actualizarAjusteLinea(linea){
+    const lista = Number(linea.precioLista) || 0;
+    const difiere = Math.abs(linea.price - lista) > 0.005;
+    if(linea.esServicio){
+      const s = (state.servicios||[]).find(x=> x.id === linea.productId);
+      linea.ajustado = !!s && !s.precioVariable && lista > 0 && difiere;       // un servicio sin precio fijo no se "ajusta": así se vende
+    }else{
+      linea.precioManual = difiere && linea.price > 0;                         // con precio escrito a mano no aplican las promociones
+      linea.ajustado = linea.precioManual;
+    }
+  }
+  // Se escribe el PRECIO de la línea (el que sale en negritas a la derecha). Mientras se teclea se actualizan el
+  // precio por unidad, el total y el resumen de pago, sin volver a dibujar la fila (así el cursor no se mueve).
+  document.addEventListener('input', (e)=>{
+    const t = e.target;
+    if(!t || !t.dataset || !t.dataset.precioServicio) return;
+    const linea = lineaEditablePorId(t.dataset.precioServicio);
+    if(!linea) return;
+    const escrito = Number(t.value);
+    const valido = t.value !== '' && escrito > 0;
+    t.classList.toggle('invalido', !valido);
+    linea.precioInvalido = !valido;
+    if(valido){ linea.price = r2(escrito / (linea.qty || 1)); linea.precioValido = linea.price; }
+    else if(linea.esServicio){ linea.price = 0; }
+    actualizarAjusteLinea(linea);
+    const fila = t.closest('.cart-row');
+    const unidad = fila ? fila.querySelector('.cart-row-price') : null;
+    if(unidad) unidad.textContent = formatMoney(linea.price) + ' c/u';
+    renderCartSummary();
+  });
+  // El precio solo se escribe: no cambia con las flechas del teclado ni con la rueda del mouse (subía o bajaba sin parar)
+  document.addEventListener('keydown', (e)=>{
+    const t = e.target;
+    if(t && t.dataset && t.dataset.precioServicio && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) e.preventDefault();
+  });
+  document.addEventListener('wheel', (e)=>{
+    const t = e.target;
+    if(t && t.dataset && t.dataset.precioServicio && document.activeElement === t) t.blur();       // la rueda mueve la pantalla, no el precio
+  }, { passive:true });
+  // Al tocar el precio de una línea se selecciona TODO el número: lo que se escriba lo reemplaza (sin mover el cursor).
+  // Solo la primera vez que se entra al campo; si ya estás dentro y vuelves a tocar, el cursor queda donde toques.
+  document.addEventListener('focusin', (e)=>{
+    const t = e.target;
+    if(!t || !t.dataset || !t.dataset.precioServicio) return;
+    t.dataset.recienEnfocado = '1';
+    setTimeout(()=>{ try{ t.select(); }catch(_){ /* navegador sin selección: se escribe normal */ } }, 0);
+  });
+  document.addEventListener('mouseup', (e)=>{                                 // sin esto, soltar el clic quita la selección
+    const t = e.target;
+    if(!t || !t.dataset || !t.dataset.precioServicio) return;
+    if(t.dataset.recienEnfocado === '1'){ e.preventDefault(); t.dataset.recienEnfocado = ''; }
+  });
+  document.addEventListener('focusout', (e)=>{
+    const t = e.target;
+    if(t && t.dataset && t.dataset.precioServicio) t.dataset.recienEnfocado = '';
+  });
+  // Al salir del campo se ordena la fila; si quedó vacío o en $0 se regresa al último precio bueno
+  document.addEventListener('change', (e)=>{
+    const t = e.target;
+    if(!t || !t.dataset || !t.dataset.precioServicio) return;
+    const linea = lineaEditablePorId(t.dataset.precioServicio);
+    if(!linea) return;
+    if(linea.precioInvalido || !(linea.price > 0)){
+      const anterior = linea.precioValido || Number(linea.precioLista) || 0;
+      if(anterior > 0){ linea.price = anterior; linea.precioInvalido = false; showToast('El precio debe ser mayor a $0: se dejó ' + formatMoney(anterior) + '.', 'warn'); }
+      else showToast('El servicio necesita un precio mayor a $0.', 'warn');
+      actualizarAjusteLinea(linea);
+    }
+    renderCartItems();
+    renderCartSummary();
+  });
+  // Servicios de precio variable: el precio se pregunta cada vez que se agrega
+  function pedirPrecioServicio(s){
+    openModal('¿Cuánto cobras por: ' + escapeHTML(s.nombre) + '?', `
+      <form id="precioVariableForm" data-id="${escapeHTML(s.id)}" onsubmit="return false;">
+        <div class="compra-cabecera">
+          <label>Precio al cliente*<input name="precio" type="number" min="0" step="0.01" value="${Number(s.precio) > 0 ? s.precio : ''}" inputmode="decimal" /></label>
+          <label>Mano de obra (tu costo)<input name="manoObra" type="number" min="0" step="0.01" value="${Number(s.manoObra)||0}" inputmode="decimal" /></label>
+        </div>
+      </form>`, `
+      <button type="button" class="btn-ghost" data-action="close-modal">Cancelar</button>
+      <button type="button" class="btn-primary" data-action="pv-confirmar" data-id="${escapeHTML(s.id)}">Agregar a la venta</button>`);
+  }
+  function confirmarPrecioVariable(id){
+    const form = document.getElementById('precioVariableForm');
+    const s = (state.servicios||[]).find(x=> x.id === id);
+    if(!form || !s) return;
+    const precio = Number(form.precio.value), mo = form.manoObra.value === '' ? 0 : Number(form.manoObra.value);
+    if(form.precio.value === '' || !(precio > 0)){ showToast('Escribe el precio al cliente (mayor a 0).', 'warn'); return; }
+    if(!(mo >= 0)){ showToast('Revisa la mano de obra.', 'warn'); return; }
+    const falta = materialQueFalta(s, 1);
+    if(falta){ showToast('Falta material para ' + s.nombre + ': ' + falta + '.', 'warn'); return; }
+    const linea = lineaDeServicio(s, 1, precio, mo);
+    linea.ajustado = false;                                         // el precio variable no es un "ajuste": así se vende
+    cart.push(linea);
+    closeModal();
+    renderCart(); renderVenderGrid();
+  }
+
+  function abrirVentaRapidaServicio(id){
+    const s = (state.servicios||[]).find(x=> x.id === id);
+    if(!s) return;
+    if(cloudEnabled && !state.turnoActual){ showToast('Abre un turno de caja antes de vender.', 'warn'); closeModal(); switchTab('caja'); return; }
+    const falta = materialQueFalta(s, 1);
+    if(falta){ showToast('Falta material para ' + s.nombre + ': ' + falta + '.', 'warn'); return; }
+    ventaRapida = { id, qty:1, precio: (s.precioVariable || !(Number(s.precio) > 0)) ? '' : String(s.precio), manoObra:String(Number(s.manoObra)||0), metodo:'efectivo', recibido:String(s.precio), recibidoManual:false, cuenta:'' };
+    openModal('Vender: ' + escapeHTML(s.nombre), `
+      <form id="ventaRapidaForm" onsubmit="return false;">
+        <div class="compra-cabecera">
+          <label>Cantidad<input data-vr="qty" type="number" min="1" step="1" value="1" inputmode="numeric" /></label>
+          <label>Precio${(s.precioVariable || !(Number(s.precio) > 0)) ? '*' : ''}<input data-vr="precio" type="number" min="0" step="0.01" value="${(s.precioVariable || !(Number(s.precio) > 0)) ? '' : s.precio}" inputmode="decimal" /></label>
+          <label>Mano de obra (tu costo)<input data-vr="manoObra" type="number" min="0" step="0.01" value="${Number(s.manoObra)||0}" inputmode="decimal" /></label>
+        </div>
+        <p style="margin:6px 0 0; font-size:.76rem; color:var(--ink-soft);">Precio de lista: ${s.precioVariable ? 'variable' : (Number(s.precio) > 0 ? formatMoney(s.precio) : 'sin precio fijo')}. ${Number(s.precio) > 0 && !s.precioVariable ? 'Si lo cambias, queda registrado.' : ''}</p>
+        <p style="margin:14px 0 6px; font-size:.85rem; font-weight:600;">Forma de pago</p>
+        <div class="method-row" id="vrMetodos">
+          <button type="button" class="method-btn active" data-action="vr-metodo" data-m="efectivo"><span>Efectivo</span></button>
+          <button type="button" class="method-btn" data-action="vr-metodo" data-m="transferencia"><span>Transferencia</span></button>
+          <button type="button" class="method-btn" data-action="vr-metodo" data-m="terminal"><span>Terminal</span></button>
+        </div>
+        <div id="vrEfectivo" style="margin-top:12px;"><label style="font-size:.78rem; font-weight:600;">Recibido<input data-vr="recibido" type="number" min="0" step="0.01" value="${s.precio}" inputmode="decimal" style="display:block; width:100%;" /></label></div>
+        <div id="vrCuenta" style="margin-top:12px; display:none;"><label style="font-size:.78rem; font-weight:600;">Cuenta que recibe la transferencia
+          <select data-vr="cuenta" style="display:block; width:100%;"><option value="">— Sin especificar —</option>${(state.cuentasBancarias||[]).map(c=>{ const v = c.nombre + ' — ' + c.numero; return `<option value="${escapeHTML(v)}">${escapeHTML(v)}</option>`; }).join('')}</select></label></div>
+        <p id="vrResumen" style="margin-top:14px; font-weight:700;"></p>
+      </form>
+    `, `
+      <button type="button" class="btn-ghost" data-action="close-modal">Cancelar</button>
+      <button type="button" class="btn-secondary" data-action="vr-carrito">Agregar al carrito</button>
+      <button type="button" class="btn-primary" data-action="vr-cobrar">Cobrar</button>
+    `);
+    const form = document.getElementById('ventaRapidaForm');
+    const alEditar = (e)=>{
+      const t = e.target; if(!ventaRapida || !t || !t.dataset.vr) return;
+      if(t.dataset.vr === 'recibido') ventaRapida.recibidoManual = true;
+      ventaRapida[t.dataset.vr] = t.value;
+      actualizarVentaRapida();
+    };
+    form.addEventListener('input', alEditar);
+    form.addEventListener('change', alEditar);
+    actualizarVentaRapida();
+  }
+  function totalVentaRapida(){
+    const s = ventaRapida ? (state.servicios||[]).find(x=> x.id === ventaRapida.id) : null;
+    return s ? (Number(ventaRapida.precio) || 0) * (Number(ventaRapida.qty) || 0) : 0;
+  }
+  function elegirMetodoVentaRapida(m){
+    if(!ventaRapida) return;
+    ventaRapida.metodo = m;
+    document.querySelectorAll('#vrMetodos .method-btn').forEach(b=> b.classList.toggle('active', b.dataset.m === m));
+    actualizarVentaRapida();
+  }
+  function actualizarVentaRapida(){
+    if(!ventaRapida) return;
+    const total = totalVentaRapida();
+    if(!ventaRapida.recibidoManual) ventaRapida.recibido = String(total);            // mientras no se escriba otro monto, "recibido" = el total
+    const cajaRec = document.querySelector('#ventaRapidaForm [data-vr="recibido"]');
+    if(cajaRec && !ventaRapida.recibidoManual) cajaRec.value = String(total);
+    const ef = document.getElementById('vrEfectivo'), cu = document.getElementById('vrCuenta'), res = document.getElementById('vrResumen');
+    if(ef) ef.style.display = ventaRapida.metodo === 'efectivo' ? '' : 'none';
+    if(cu) cu.style.display = (ventaRapida.metodo === 'transferencia' && (state.cuentasBancarias||[]).length) ? '' : 'none';
+    if(res){
+      if(ventaRapida.metodo === 'efectivo'){
+        const cambio = (Number(ventaRapida.recibido) || 0) - total;
+        res.innerHTML = 'Total: ' + formatMoney(total) + ' · ' + (cambio >= 0 ? 'Cambio: ' + formatMoney(cambio) : '<span style="color:var(--red);">Faltan ' + formatMoney(-cambio) + '</span>');
+      }else{
+        res.textContent = 'Total: ' + formatMoney(total);
+      }
+    }
+  }
+  async function cobrarVentaRapida(){
+    const vr = ventaRapida;
+    if(!vr) return;
+    const s = (state.servicios||[]).find(x=> x.id === vr.id);
+    if(!s){ closeModal(); return; }
+    const qty = Number(vr.qty);
+    if(!Number.isInteger(qty) || qty < 1){ showToast('La cantidad debe ser un número entero de 1 o más.', 'warn'); return; }
+    if(qty > disponiblesServicio(s)){ showToast('Falta material para ' + qty + ' servicio(s) de ' + s.nombre + '.', 'warn'); return; }
+    const precioNuevo = Number(vr.precio), manoNueva = vr.manoObra === '' ? 0 : Number(vr.manoObra);
+    if(vr.precio === '' || !(precioNuevo > 0)){ showToast('Escribe el precio al cliente (mayor a 0).', 'warn'); return; }
+    if(!(manoNueva >= 0)){ showToast('Revisa la mano de obra.', 'warn'); return; }
+    const total = precioNuevo * qty;
+    if(vr.metodo === 'efectivo' && !(Number(vr.recibido) >= total)){ showToast('El monto recibido es menor al total.', 'warn'); return; }
+    // El carrito que se tenga en Vender NO se toca: se guarda, se cobra el servicio con el mismo proceso de siempre y se regresa
+    const respaldo = { cart, selectedMethod, receivedDraft, descuentoPct, pagoMixtoDraft, quiereFactura, datosFiscalesDraft, cuentaTransferenciaSeleccionada, cuentaPickerAbierto };
+    cart = [ lineaDeServicio(s, qty, precioNuevo, manoNueva) ];
+    if(s.precioVariable) cart[0].ajustado = false;
+    descuentoPct = 0; quiereFactura = false; pagoMixtoDraft = { efectivo:'', transferencia:'', terminal:'' };
+    selectedMethod = vr.metodo;
+    receivedDraft = vr.metodo === 'efectivo' ? String(vr.recibido) : '';
+    cuentaTransferenciaSeleccionada = vr.metodo === 'transferencia' ? (vr.cuenta || '') : '';
+    ventaRapida = null;
+    closeModal();
+    try{ await completeSale(); }
+    finally{
+      cart = respaldo.cart; selectedMethod = respaldo.selectedMethod; receivedDraft = respaldo.receivedDraft; descuentoPct = respaldo.descuentoPct;
+      pagoMixtoDraft = respaldo.pagoMixtoDraft; quiereFactura = respaldo.quiereFactura; datosFiscalesDraft = respaldo.datosFiscalesDraft;
+      cuentaTransferenciaSeleccionada = respaldo.cuentaTransferenciaSeleccionada; cuentaPickerAbierto = respaldo.cuentaPickerAbierto;
+      renderCart(); renderVenderGrid(); renderServicios();
+    }
+  }
+  function ventaRapidaAlCarrito(){
+    const vr = ventaRapida;
+    if(!vr) return;
+    const qty = Math.max(1, Math.floor(Number(vr.qty) || 1));
+    const s = (state.servicios||[]).find(x=> x.id === vr.id);
+    const precioNuevo = Number(vr.precio), manoNueva = vr.manoObra === '' ? 0 : Number(vr.manoObra);
+    if(!s) return;
+    if(vr.precio === '' || !(precioNuevo > 0)){ showToast('Escribe el precio al cliente (mayor a 0).', 'warn'); return; }
+    if(!(manoNueva >= 0)){ showToast('Revisa la mano de obra.', 'warn'); return; }
+    const existente = cart.find(c=> c.productId === s.id);
+    if(existente){ existente.qty += qty; }
+    else{
+      const linea = lineaDeServicio(s, qty, precioNuevo, manoNueva);
+      if(s.precioVariable) linea.ajustado = false;
+      cart.push(linea);
+    }
+    ventaRapida = null;
+    closeModal();
+    renderCart(); renderVenderGrid();
+    switchTab('vender');
+    const campoPrecio = document.querySelector('#cartItems [data-precio-servicio="' + s.id + '"]');
+    if(campoPrecio && !(Number(s.precio) > 0) && !s.precioVariable && !(precioNuevo > 0)){ campoPrecio.focus(); if(campoPrecio.select) campoPrecio.select(); }
+  }
+
   function abrirDetalleServicio(id){
     const s = (state.servicios||[]).find(x=> x.id === id);
     if(!s) return;
@@ -2389,7 +3377,7 @@
     }).join('');
     openModal(escapeHTML(s.nombre), `
       <div style="display:grid; gap:6px; font-size:.9rem; margin-bottom:12px;">
-        <div><b>Precio al cliente:</b> ${formatMoney(s.precio)}</div>
+        <div><b>Precio al cliente:</b> ${s.precioVariable ? 'variable (se pregunta al vender)' + (Number(s.precio) > 0 ? ' · sugerido ' + formatMoney(s.precio) : '') : (Number(s.precio) > 0 ? formatMoney(s.precio) : 'sin precio fijo (se escribe al vender)')}</div>
         <div><b>Mano de obra:</b> ${formatMoney(s.manoObra||0)}</div>
         <div><b>Costo de materiales:</b> ${formatMoney(costoMat)}</div>
         <div><b>Costo total:</b> ${formatMoney(costo)} · <b>Ganancia:</b> <span style="color:${ganancia<0?'var(--red)':'inherit'};">${formatMoney(ganancia)}</span></div>
@@ -2400,7 +3388,8 @@
         <tbody>${filas}</tbody></table></div>` : '<p style="color:var(--ink-soft); font-size:.88rem;">Este servicio no usa materiales (solo mano de obra).</p>'}
     `, `
       ${puedeGestionar() ? `<button type="button" class="btn-secondary" data-action="servicio-editar" data-id="${s.id}">Editar</button>` : ''}
-      <button type="button" class="btn-primary" data-action="close-modal">Cerrar</button>`);
+      <button type="button" class="btn-ghost" data-action="close-modal">Cerrar</button>
+      <button type="button" class="btn-primary" data-action="servicio-vender" data-id="${s.id}">Vender</button>`);
     const m = document.querySelector('#modalRoot .modal'); if(m) m.classList.add('modal-ancho');
   }
   function materialesDisponibles(){
@@ -2408,9 +3397,9 @@
   }
   function htmlMaterialServicio(m, i){
     const opciones = '<option value="">— Escoge el material —</option>'
-      + materialesDisponibles().map(p=>`<option value="${p.id}"${m.productId===p.id?' selected':''}>${escapeHTML(p.name)} (hay ${formatCantidad(p.stock)})</option>`).join('');
+      + materialesDisponibles().map(p=>`<option value="${p.id}" data-sku="${escapeHTML(codigosDeProducto(p))}"${m.productId===p.id?' selected':''}>${escapeHTML(p.name)} (hay ${formatCantidad(p.stock)})</option>`).join('');
     return `<div class="compra-linea" data-i="${i}" style="grid-template-columns:minmax(180px,3fr) minmax(90px,1fr) auto;">
-      <label>Material<select data-campo="productId">${opciones}</select></label>
+      <label>Material<select data-campo="productId" data-buscable>${opciones}</select></label>
       <label>Cantidad por servicio<input data-campo="cantidad" type="number" step="any" min="0" value="${escapeHTML(String(m.cantidad))}" /></label>
       <button type="button" class="compra-quitar" data-action="servicio-quitar-material" data-i="${i}" aria-label="Quitar material">×</button>
     </div>`;
@@ -2419,6 +3408,7 @@
     const cont = document.getElementById('servicioMateriales');
     if(!cont || !borradorServicio) return;
     cont.innerHTML = borradorServicio.materiales.map(htmlMaterialServicio).join('') || '<p style="color:var(--ink-soft); font-size:.85rem;">Sin materiales (solo mano de obra).</p>';
+    activarBuscadores(cont);
     actualizarResumenServicio();
   }
   function actualizarResumenServicio(){
@@ -2449,8 +3439,8 @@
     const existente = id ? (state.servicios||[]).find(x=> x.id === id) : null;
     if(id && !existente) return;
     borradorServicio = existente
-      ? { nombre:existente.nombre, precio:existente.precio, manoObra:existente.manoObra||0, materiales:(existente.materiales||[]).map(m=>({ productId:m.productId, cantidad:m.cantidad })) }
-      : { nombre:'', precio:'', manoObra:0, materiales:[] };
+      ? { nombre:existente.nombre, precio:existente.precio, manoObra:existente.manoObra||0, precioVariable:!!existente.precioVariable, materiales:(existente.materiales||[]).map(m=>({ productId:m.productId, cantidad:m.cantidad })) }
+      : { nombre:'', precio:'', manoObra:0, precioVariable:false, materiales:[] };
     openModal(existente ? 'Editar servicio' : 'Nuevo servicio', `
       <form id="servicioForm" onsubmit="return false;">
         <div class="compra-cabecera">
@@ -2458,6 +3448,11 @@
           <label>Precio al cliente*<input data-cab="precio" type="number" step="0.01" min="0" value="${escapeHTML(String(borradorServicio.precio))}" /></label>
           <label>Mano de obra (tu costo)<input data-cab="manoObra" type="number" step="0.01" min="0" value="${escapeHTML(String(borradorServicio.manoObra))}" /></label>
         </div>
+        <label style="display:flex; gap:8px; align-items:flex-start; margin-top:12px; font-size:.84rem;">
+          <input data-cab="precioVariable" type="checkbox" ${borradorServicio.precioVariable ? 'checked' : ''} style="margin-top:3px;" />
+          <span><b>Precio variable:</b> pedir el precio cada vez que se vende (para trabajos que cuestan distinto). El precio de arriba queda como sugerido, o puede ir vacío.</span>
+        </label>
+        <p style="font-size:.76rem; color:var(--ink-soft); margin:6px 0 0;">Puedes dejar el precio en $0 y escribirlo al vender, o fijar uno (al venderlo se puede cambiar y el cambio queda registrado).</p>
         <p style="font-size:.8rem; color:var(--ink-soft); margin:10px 0 4px;">Materiales que se usan en cada servicio (se descuentan del inventario al venderlo). Se aceptan decimales, por ejemplo 3.5 litros.</p>
         <div id="servicioMateriales"></div>
         <button type="button" class="btn-secondary btn-sm" data-action="servicio-agregar-material">+ Agregar material</button>
@@ -2472,7 +3467,7 @@
     const alEditar = (e)=>{
       const t = e.target;
       if(!borradorServicio || !t) return;
-      if(t.dataset.cab){ borradorServicio[t.dataset.cab] = t.value; actualizarResumenServicio(); return; }
+      if(t.dataset.cab){ borradorServicio[t.dataset.cab] = (t.type === 'checkbox') ? t.checked : t.value; actualizarResumenServicio(); return; }
       const fila = t.closest ? t.closest('.compra-linea') : null;
       if(!fila || !t.dataset.campo) return;
       const i = Number(fila.dataset.i);
@@ -2492,7 +3487,7 @@
     const precio = Number(b.precio), manoObra = Number(b.manoObra === '' ? 0 : b.manoObra);
     if(!nombre){ showToast('Escribe el nombre del servicio.', 'warn'); return; }
     if((state.servicios||[]).some(s=> s.id !== id && s.nombre.trim().toLowerCase() === nombre.toLowerCase())){ showToast('Ya hay un servicio con ese nombre.', 'warn'); return; }
-    if(!(precio > 0)){ showToast('Escribe el precio al cliente.', 'warn'); return; }
+    if(!(precio >= 0)){ showToast('Revisa el precio.', 'warn'); return; }          // el precio puede quedar en $0: se escribe al vender
     if(!(manoObra >= 0)){ showToast('Revisa la mano de obra.', 'warn'); return; }
     const materiales = [];
     for(const m of b.materiales){
@@ -2506,10 +3501,10 @@
     if(id){
       const s = state.servicios.find(x=> x.id === id);
       if(!s) return;
-      Object.assign(s, { nombre, precio:r2(precio), manoObra:r2(manoObra), materiales });
+      Object.assign(s, { nombre, precio:r2(precio), manoObra:r2(manoObra), precioVariable:!!b.precioVariable, materiales });
       cart = cart.filter(c=> c.productId !== id);        // el carrito se recalcula con los datos nuevos
     }else{
-      state.servicios.push({ id: uid('sv_'), nombre, precio:r2(precio), manoObra:r2(manoObra), materiales });
+      state.servicios.push({ id: uid('sv_'), nombre, precio:r2(precio), manoObra:r2(manoObra), precioVariable:!!b.precioVariable, materiales });
     }
     saveState();
     markSnapshotDirty();
@@ -2620,7 +3615,7 @@
       if(!data) return;
       const pendientes = new Set((state.pendingGastos||[]).map(g=> g.id));
       const locales = (state.gastosCaja||[]).filter(g=> g.turnoId !== t.id || pendientes.has(g.id));
-      const nube = data.map(g=>({ id:g.id, turnoId:g.turno_id, cajero:g.cajero||'', concepto:g.concepto, monto:Number(g.monto)||0, fechaISO:g.fecha_hora }));
+      const nube = data.map(g=>({ id:g.local_id || g.id, turnoId:g.turno_id, cajero:g.cajero||'', concepto:g.concepto, monto:Number(g.monto)||0, fechaISO:g.fecha_hora }));
       state.gastosCaja = locales.concat(nube);
       saveState();
       renderTurnoEstado();
@@ -2634,8 +3629,22 @@
   // en el equipo se guarda una copia compacta de las más recientes, sin pasar de este presupuesto.
   const COMPRAS_LOCALES_PRESUPUESTO = 700000;   // caracteres (~0.7 MB)
   function compraCompacta(f){
-    return { id:f.id, numero:f.numero, proveedor:f.proveedor, fecha:f.fecha, uuid:f.uuid, total:f.total, creadaISO:f.creadaISO,
-      items:(f.items||[]).map(it=>({ productId:it.productId, nombre:it.nombre, sku:it.sku, cantidad:it.cantidad, costoUnit:it.costoUnit, importe:it.importe })) };
+    const r = { id:f.id, numero:f.numero, proveedor:f.proveedor, fecha:f.fecha, uuid:f.uuid, total:f.total, creadaISO:f.creadaISO,
+      items:(f.items||[]).map(it=>{
+        const o = { productId:it.productId, nombre:it.nombre, sku:it.sku, cantidad:it.cantidad, costoUnit:it.costoUnit, importe:it.importe };
+        if(it.costoAnterior !== undefined && it.costoAnterior !== null) o.costoAnterior = it.costoAnterior;     // para regresar el costo si la factura se anula
+        return o;
+      }) };
+    if(f.anulada){ r.anulada = true; r.anuladaPor = f.anuladaPor || ''; r.anuladaISO = f.anuladaISO || ''; r.motivoAnulacion = f.motivoAnulacion || ''; }
+    if(f.ediciones){ r.ediciones = Number(f.ediciones) || 0; r.editadaISO = f.editadaISO || ''; r.editadaPor = f.editadaPor || ''; r.motivoEdicion = f.motivoEdicion || ''; }
+    return r;
+  }
+  // Un renglón de la nube (compras_factura) convertido al formato de este equipo
+  function compraDesdeFila(f){
+    return compraCompacta({ id:f.local_id || f.id, numero:f.numero, proveedor:f.proveedor || '', fecha:f.fecha, uuid:f.uuid_fiscal || f.uuid_anulado || '',
+      total:Number(f.total) || 0, items:f.items || [], creadaISO:f.created_at,
+      anulada:!!f.anulada, anuladaPor:f.anulada_por || '', anuladaISO:f.anulada_en || '', motivoAnulacion:f.motivo_anulacion || '',
+      ediciones:Number(f.ediciones) || 0, editadaISO:f.editada_en || '', editadaPor:f.editada_por || '', motivoEdicion:f.motivo_edicion || '' });
   }
   function recortarComprasLocales(){
     let usado = 0;
@@ -2659,6 +3668,7 @@
   function facturasPorProducto(){
     const mapa = {};
     (state.compras||[]).forEach(f=>{
+      if(f.anulada) return;                                                       // una factura anulada ya no surtió esa mercancía
       (f.items||[]).forEach(it=>{ (mapa[it.productId] = mapa[it.productId] || []).push({ numero:f.numero, proveedor:f.proveedor||'' }); });
     });
     return mapa;
@@ -2691,12 +3701,12 @@
     }
     const visibles = comprasVerTodo ? filtradas : filtradas.slice(0, COMPRAS_LIMITE);
     if(pie) pie.innerHTML = pieInventario(filtradas.length, comprasVerTodo, 'compras-ver-todo', 'compras-ver-menos');
-    tbody.innerHTML = visibles.map(f=>`<tr>
+    tbody.innerHTML = visibles.map(f=>`<tr${f.anulada ? ' style="opacity:.62;"' : ''}>
       <td>${escapeHTML(f.fecha||'')}</td>
-      <td>${escapeHTML(f.numero)}</td>
+      <td>${escapeHTML(f.numero)}${f.anulada ? ' <span class="stock-pill stock-out">Anulada</span>' : (f.ediciones ? ' <span class="stock-pill stock-low">Corregida</span>' : '')}</td>
       <td>${escapeHTML(f.proveedor||'—')}</td>
       <td class="num">${(f.items||[]).length}</td>
-      <td class="num">${formatMoney(f.total)}</td>
+      <td class="num"${f.anulada ? ' style="text-decoration:line-through;"' : ''}>${formatMoney(f.total)}</td>
       <td class="row-actions"><button type="button" class="link-btn" data-action="compras-ver" data-id="${f.id}">Ver</button></td>
     </tr>`).join('');
   }
@@ -2709,7 +3719,11 @@
       <td class="num">${formatMoney(it.costoUnit)}</td>
       <td class="num">${formatMoney(it.importe)}</td>
     </tr>`).join('');
+    const cuando = (iso)=> iso ? new Date(iso).toLocaleString('es-MX', { dateStyle:'medium', timeStyle:'short' }) : '';
     openModal('Factura ' + escapeHTML(f.numero), `
+      ${f.anulada ? `<div style="margin:0 0 12px; padding:10px 12px; border:1px solid var(--red); border-radius:var(--radius-md); font-size:.86rem;">
+        <b>Factura ANULADA</b> el ${escapeHTML(cuando(f.anuladaISO))} por ${escapeHTML(f.anuladaPor || 'Administrador')}.<br>Motivo: ${escapeHTML(f.motivoAnulacion || '—')}</div>` : ''}
+      ${(!f.anulada && f.ediciones) ? `<p style="font-size:.8rem; color:var(--ink-soft); margin:0 0 8px;">Corregida ${f.ediciones} ${f.ediciones === 1 ? 'vez' : 'veces'}. Última: ${escapeHTML(cuando(f.editadaISO))} · ${escapeHTML(f.motivoEdicion || '')}</p>` : ''}
       <p style="font-size:.88rem; color:var(--ink-soft); margin:0 0 10px;">
         ${escapeHTML(f.proveedor||'Sin proveedor')} · ${escapeHTML(f.fecha||'')}
         ${f.uuid ? '<br><span class="mono" style="font-size:.74rem;">UUID: '+escapeHTML(f.uuid)+'</span>' : ''}
@@ -2719,8 +3733,234 @@
         <tbody>${filas}</tbody>
       </table></div>
       <p style="margin-top:12px; font-weight:700;">Total sin IVA: ${formatMoney(f.total)}</p>
-    `, '<button type="button" class="btn-primary" data-action="close-modal">Cerrar</button>');
+    `, f.anulada
+      ? '<button type="button" class="btn-primary" data-action="close-modal">Cerrar</button>'
+      : `<button type="button" class="btn-ghost" data-action="close-modal">Cerrar</button>
+         <button type="button" class="btn-secondary" data-action="compras-editar" data-id="${escapeHTML(f.id)}">Corregir</button>
+         <button type="button" class="btn-danger" data-action="compras-anular" data-id="${escapeHTML(f.id)}">Anular</button>`);
     const m = document.querySelector('#modalRoot .modal'); if(m) m.classList.add('modal-ancho');
+  }
+
+  // ---------- Anular y corregir facturas de compra (con PIN de administrador) ----------
+  var sinEtapa4 = false;          // true si la nube todavía no tiene las funciones de anular/corregir (aún no se corre su SQL): los cambios quedan pendientes
+  // Aplica un renglón de factura al inventario (suma las piezas y deja el costo) y regresa el renglón guardado.
+  // Guarda el costo que tenía el producto antes, para poder regresarlo si la factura se anula.
+  function aplicarLineaCompra(l, cant, factor, costo){
+    const piezas = r3(cant * factor);
+    const costoPieza = Math.round(costo / factor * 10000) / 10000;
+    let p, costoAnterior = null;
+    if(l.productId === '__nuevo__'){
+      p = addProduct({ name:l.nombreNuevo, category:(l.categoriaNuevo || 'General'), sku:(l.skuNuevo || ''), price:Number(l.precioNuevo), cost:costoPieza, stock:piezas, minStock:5 });
+    }else{
+      p = state.products.find(x=> x.id === l.productId);
+      if(p) costoAnterior = Number(p.cost) || 0;
+      receiveStock(l.productId, piezas, costoPieza);
+    }
+    if(!p) return null;
+    const item = { productId:p.id, nombre:p.name, sku:p.sku || '', cantidad:piezas, costoUnit:costoPieza, importe:r2(cant * costo), descripcion:l.descripcion || '' };
+    if(costoAnterior !== null) item.costoAnterior = costoAnterior;
+    return item;
+  }
+  // Resta del inventario lo que esos renglones habían sumado, regresa el costo (si nadie lo cambió después) y deja el movimiento
+  // negativo, que es lo que hace que Finanzas ya no cuente esa compra como inversión.
+  function revertirItemsCompra(items){
+    (items || []).forEach(it=>{
+      const p = state.products.find(x=> x.id === it.productId);
+      if(p && !p.ilimitado){
+        p.stock = r3(p.stock - Number(it.cantidad));
+        if(it.costoAnterior !== undefined && it.costoAnterior !== null && Math.abs((Number(p.cost) || 0) - Number(it.costoUnit)) < 0.00005) p.cost = Number(it.costoAnterior);
+      }
+      queueMovimiento({ producto_id: it.productId, producto_nombre: it.nombre, cantidad: -Number(it.cantidad), costo_unitario: Number(it.costoUnit) });
+    });
+  }
+  function validarPinAdminCompra(pinEscrito, idError){
+    if(pinEstaBloqueado()){ showToast('Demasiados intentos. Espera un momento e inténtalo de nuevo.', 'error'); return false; }
+    const clave = String(pinEscrito || '').trim();
+    if(!state.adminPin){ showToast('Este negocio no tiene PIN de administrador.', 'error'); return false; }
+    if(!clave || clave !== state.adminPin){
+      const seBloqueo = registrarIntentoFallidoPin();
+      const err = document.getElementById(idError);
+      if(seBloqueo){ showToast('Demasiados intentos. Espera 60 segundos.', 'error'); closeModal(); }
+      else if(err){ err.textContent = 'PIN incorrecto.'; err.style.display = 'block'; }
+      return false;
+    }
+    registrarIntentoExitosoPin();
+    return true;
+  }
+  // deltas = { productId: cambio en piezas }. Regresa los productos que quedarían con existencia negativa (porque parte ya se vendió).
+  function productosQueQuedanEnNegativo(deltas){
+    const lista = [];
+    Object.keys(deltas).forEach(id=>{
+      const d = deltas[id];
+      if(!(d < 0)) return;
+      const p = state.products.find(x=> x.id === id);
+      if(!p || p.ilimitado) return;
+      const queda = r3(p.stock + d);
+      if(queda < 0) lista.push({ nombre:p.name, hay:p.stock, queda });
+    });
+    return lista;
+  }
+  function htmlNegativosCompra(riesgos){
+    return `<div style="margin-top:12px; padding:10px 12px; border:1px solid var(--red); border-radius:var(--radius-md); font-size:.86rem;">
+      <b>Ojo: parte de esta mercancía ya se vendió.</b> Estos productos quedarían con existencia negativa:
+      <ul style="margin:6px 0 0 18px;">${riesgos.map(r=>`<li>${escapeHTML(r.nombre)}: hay ${formatCantidad(r.hay)}, quedaría ${formatCantidad(r.queda)}</li>`).join('')}</ul>
+      <label style="display:flex; gap:8px; align-items:flex-start; margin-top:8px;"><input type="checkbox" name="entiendo" style="margin-top:3px;" /> <span>Entiendo y quiero continuar</span></label>
+    </div>`;
+  }
+  function deltasDeAnular(f){
+    const d = {};
+    (f.items || []).forEach(it=>{ d[it.productId] = r3((d[it.productId] || 0) - Number(it.cantidad)); });
+    return d;
+  }
+  function abrirAnularCompra(id){
+    const f = (state.compras || []).find(x=> x.id === id);
+    if(!f || f.anulada) return;
+    const riesgos = productosQueQuedanEnNegativo(deltasDeAnular(f));
+    const filas = (f.items || []).map(it=>{
+      const p = state.products.find(x=> x.id === it.productId);
+      return `<tr><td>${escapeHTML(it.nombre)}</td><td class="num">−${formatCantidad(it.cantidad)}</td><td class="num">${p ? formatCantidad(p.stock) : '—'}</td><td class="num">${p ? formatCantidad(r3(p.stock - Number(it.cantidad))) : '—'}</td></tr>`;
+    }).join('');
+    openModal('Anular factura ' + escapeHTML(f.numero), `
+      <form id="anularCompraForm" data-id="${escapeHTML(f.id)}" onsubmit="return false;">
+        <p style="font-size:.88rem; margin:0 0 8px;">Al anularla, el POS:</p>
+        <ul style="font-size:.86rem; margin:0 0 10px 18px;">
+          <li>resta del inventario lo que esta factura había sumado;</li>
+          <li>deja de contarla como inversión en Finanzas;</li>
+          <li>la deja en la lista marcada como «Anulada» (no se borra);</li>
+          <li>libera su folio fiscal, para que puedas registrarla de nuevo bien capturada.</li>
+        </ul>
+        <div class="table-scroll"><table class="data-table">
+          <thead><tr><th>Producto</th><th class="num">Se resta</th><th class="num">Hay</th><th class="num">Quedaría</th></tr></thead>
+          <tbody>${filas}</tbody>
+        </table></div>
+        ${riesgos.length ? htmlNegativosCompra(riesgos) : ''}
+        <div class="compra-cabecera" style="margin-top:12px;">
+          <label>Motivo*<input name="motivo" type="text" maxlength="120" placeholder="Ej. Capturada dos veces" /></label>
+          <label>PIN de administrador*<input name="pin" type="password" inputmode="numeric" autocomplete="off" /></label>
+        </div>
+        <p id="anularCompraError" class="error-text" style="display:none; margin-top:6px;"></p>
+      </form>
+    `, `
+      <button type="button" class="btn-ghost" data-action="close-modal">Cancelar</button>
+      <button type="button" class="btn-danger" data-action="compra-anular-confirmar">Anular factura</button>
+    `);
+  }
+  function confirmarAnularCompra(){
+    const form = document.getElementById('anularCompraForm');
+    if(!form) return;
+    const f = (state.compras || []).find(x=> x.id === form.dataset.id);
+    if(!f || f.anulada){ closeModal(); return; }
+    const motivo = form.motivo.value.trim();
+    if(!motivo){ showToast('Escribe el motivo de la anulación.', 'warn'); return; }
+    const riesgos = productosQueQuedanEnNegativo(deltasDeAnular(f));
+    if(riesgos.length && !(form.entiendo && form.entiendo.checked)){ showToast('Marca la casilla para confirmar que algunos productos quedarán en negativo.', 'warn'); return; }
+    if(!validarPinAdminCompra(form.pin.value, 'anularCompraError')) return;
+    revertirItemsCompra(f.items);
+    f.anulada = true; f.anuladaPor = 'Administrador'; f.anuladaISO = new Date().toISOString(); f.motivoAnulacion = motivo;
+    state.pendingComprasCambios.push({ tipo:'anular', id:f.id, numeroRef:f.numero, por:'Administrador', motivo });
+    saveState();
+    markSnapshotDirty();
+    flushSync();
+    logEvento('compra_anulada', { numero:f.numero, proveedor:f.proveedor || '', total:f.total, motivo }, 'Administrador');
+    closeModal();
+    renderInventory(); renderInventarioAdminList(); renderVenderGrid(); renderCompras();
+    showToast('Factura ' + f.numero + ' anulada. Se restaron ' + (f.items || []).length + ' producto(s) del inventario.', 'success');
+  }
+  function abrirEditarCompra(id){
+    const f = (state.compras || []).find(x=> x.id === id);
+    if(!f || f.anulada) return;
+    const lineas = (f.items || []).map(it=>{
+      const l = lineaCompraVacia();
+      l.productId = state.products.some(p=> p.id === it.productId) ? it.productId : '';
+      l.descripcion = it.descripcion || '';
+      l.cantidad = String(it.cantidad); l.factor = 1; l.costoUnit = String(it.costoUnit);
+      return l;
+    });
+    abrirNuevaCompra({ editandoId:f.id, numero:f.numero, proveedor:f.proveedor || '', fecha:f.fecha, uuid:f.uuid || '', lineas });
+  }
+  // Revisa los renglones del formulario (mismos avisos que al guardar una factura nueva)
+  function leerLineasCompra(b){
+    const lineas = [];
+    for(let i = 0; i < b.lineas.length; i++){
+      const l = b.lineas[i];
+      const cant = Number(l.cantidad), factor = Number(l.factor === '' ? 1 : l.factor), costo = Number(l.costoUnit);
+      const n = i + 1;
+      if(!l.productId){ showToast('Renglón ' + n + ': escoge el producto.', 'warn'); return null; }
+      if(l.productId === '__nuevo__'){
+        if(!(l.nombreNuevo || '').trim()){ showToast('Renglón ' + n + ': escribe el nombre del producto nuevo.', 'warn'); return null; }
+        if(!(Number(l.precioNuevo) > 0)){ showToast('Renglón ' + n + ': escribe el precio de venta del producto nuevo.', 'warn'); return null; }
+      }
+      if(!(cant > 0)){ showToast('Renglón ' + n + ': la cantidad debe ser mayor a 0.', 'warn'); return null; }
+      if(!(factor > 0)){ showToast('Renglón ' + n + ': las piezas por unidad deben ser mayores a 0.', 'warn'); return null; }
+      if(l.costoUnit === '' || !(costo >= 0)){ showToast('Renglón ' + n + ': escribe el costo unitario.', 'warn'); return null; }
+      lineas.push({ l, cant, factor, costo });
+    }
+    return lineas;
+  }
+  function guardarEdicionCompra(){
+    if(bloqueadoPorSuspension()) return;
+    const b = borradorCompra;
+    if(!b || !b.editandoId) return;
+    const f = (state.compras || []).find(x=> x.id === b.editandoId);
+    if(!f || f.anulada){ closeModal(); return; }
+    const form = document.getElementById('compraForm');
+    if(!form) return;
+    const numero = (b.numero || '').trim(), proveedor = (b.proveedor || '').trim(), uuid = (b.uuid || '').trim();
+    if(!numero){ showToast('Escribe el número de factura.', 'warn'); return; }
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(b.fecha || '')){ showToast('Escribe la fecha de la factura.', 'warn'); return; }
+    if(!b.lineas.length){ showToast('Una factura necesita al menos un producto. Si no debió registrarse, anúlala.', 'warn'); return; }
+    const otras = (state.compras || []).filter(x=> x.id !== f.id && !x.anulada);
+    if(uuid && otras.some(x=> x.uuid && x.uuid.toLowerCase() === uuid.toLowerCase())){ showToast('Ese folio fiscal ya está en otra factura.', 'warn'); return; }
+    if(otras.some(x=> x.numero.toLowerCase() === numero.toLowerCase() && (x.proveedor || '').toLowerCase() === proveedor.toLowerCase())){ showToast('Ya hay otra factura con ese número y ese proveedor.', 'warn'); return; }
+    const lineas = leerLineasCompra(b);
+    if(!lineas) return;
+    const motivo = form.motivoEdicion.value.trim();
+    if(!motivo){ showToast('Escribe qué estás corrigiendo.', 'warn'); return; }
+    // Qué renglones quedaron igual (no se tocan) y cuáles cambiaron (se regresa el viejo y se aplica el nuevo)
+    const viejos = (f.items || []).map(it=> Object.assign({}, it));
+    const usados = new Set(), iguales = new Map();
+    lineas.forEach((x, i)=>{
+      if(x.l.productId === '__nuevo__') return;
+      const piezas = r3(x.cant * x.factor), costoPieza = Math.round(x.costo / x.factor * 10000) / 10000;
+      const k = viejos.findIndex((v, vi)=> !usados.has(vi) && v.productId === x.l.productId && r3(v.cantidad) === piezas && Math.abs(Number(v.costoUnit) - costoPieza) < 0.00005);
+      if(k >= 0){ usados.add(k); iguales.set(i, viejos[k]); }
+    });
+    const aRegresar = viejos.filter((v, vi)=> !usados.has(vi));
+    const deltas = {};
+    aRegresar.forEach(v=>{ deltas[v.productId] = r3((deltas[v.productId] || 0) - Number(v.cantidad)); });
+    lineas.forEach((x, i)=>{
+      if(iguales.has(i) || x.l.productId === '__nuevo__') return;
+      deltas[x.l.productId] = r3((deltas[x.l.productId] || 0) + r3(x.cant * x.factor));
+    });
+    const riesgos = productosQueQuedanEnNegativo(deltas);
+    if(riesgos.length && !(form.entiendo && form.entiendo.checked)){
+      const caja = document.getElementById('editarNegativosWrap');
+      if(caja){ caja.innerHTML = htmlNegativosCompra(riesgos); caja.style.display = ''; }
+      showToast('Con este cambio algunos productos quedarían en negativo. Marca la casilla para confirmar.', 'warn');
+      return;
+    }
+    if(!validarPinAdminCompra(form.pin.value, 'editarCompraError')) return;
+    revertirItemsCompra(aRegresar);
+    const items = [];
+    lineas.forEach((x, i)=>{
+      if(iguales.has(i)){ items.push(iguales.get(i)); return; }
+      const item = aplicarLineaCompra(x.l, x.cant, x.factor, x.costo);
+      if(item) items.push(item);
+    });
+    const totalAntes = f.total;
+    const total = r2(items.reduce((s, it)=> s + it.importe, 0));
+    const n = (f.ediciones || 0) + 1;
+    const nueva = compraCompacta(Object.assign({}, f, { numero, proveedor, fecha:b.fecha, uuid, total, items, ediciones:n,
+      editadaISO:new Date().toISOString(), editadaPor:'Administrador', motivoEdicion:motivo }));
+    state.compras[state.compras.indexOf(f)] = nueva;
+    state.pendingComprasCambios.push({ tipo:'editar', id:f.id, numeroRef:numero, n, por:'Administrador', motivo, datos:{ numero, proveedor, fecha:b.fecha, uuid, items, total } });
+    saveState();
+    markSnapshotDirty();
+    flushSync();
+    logEvento('compra_corregida', { numero, totalAntes, total, motivo }, 'Administrador');
+    closeModal(); borradorCompra = null;
+    renderInventory(); renderInventarioAdminList(); renderVenderGrid(); renderCompras();
+    showToast('Factura ' + numero + ' corregida: el inventario ya está ajustado.', 'success');
   }
 
   // --- Factura electrónica (XML / CFDI): se lee aquí mismo, en el navegador; el archivo no se envía a ningún lado
@@ -2831,19 +4071,19 @@
   function htmlLineaCompra(l, i){
     const opciones = '<option value="">— Escoge el producto —</option>'
       + '<option value="__nuevo__"' + (l.productId==='__nuevo__' ? ' selected' : '') + '>➕ Producto nuevo</option>'
-      + productosParaCompra().map(p=>`<option value="${p.id}"${l.productId===p.id?' selected':''}>${escapeHTML(p.name)}</option>`).join('');
+      + productosParaCompra().map(p=>`<option value="${p.id}" data-sku="${escapeHTML(codigosDeProducto(p))}"${l.productId===p.id?' selected':''}>${escapeHTML(p.name)}</option>`).join('');
     const etiqueta = l.estado === 'relacionado' ? ' <span class="stock-pill stock-ok">Relacionado</span>'
       : (l.estado === 'nuevo' ? ' <span class="stock-pill stock-low">Nuevo</span>' : '');
     return `<div class="compra-linea" data-i="${i}">
       ${l.descripcion ? `<div class="compra-desc">${escapeHTML(l.descripcion)}${l.noId?' · <span class="mono">'+escapeHTML(l.noId)+'</span>':''}${etiqueta}</div>` : ''}
-      <label>Producto*<select data-campo="productId">${opciones}</select></label>
+      <label>Producto*<select data-campo="productId" data-buscable>${opciones}</select></label>
       <label>Cantidad*<input data-campo="cantidad" type="number" step="any" min="0" value="${escapeHTML(String(l.cantidad))}" /></label>
       <label title="Si la factura viene en cajas, cuántas piezas trae cada una">Piezas por unidad<input data-campo="factor" type="number" step="any" min="0" value="${escapeHTML(String(l.factor))}" /></label>
       <label>Costo unitario (sin IVA)*<input data-campo="costoUnit" type="number" step="0.01" min="0" value="${escapeHTML(String(l.costoUnit))}" /></label>
       <button type="button" class="compra-quitar" data-action="compra-quitar-linea" data-i="${i}" aria-label="Quitar renglón">×</button>
       ${l.productId === '__nuevo__' ? `<div class="compra-nuevo">
         <label>Nombre del producto nuevo*<input data-campo="nombreNuevo" type="text" maxlength="60" value="${escapeHTML(l.nombreNuevo)}" /></label>
-        <label>Código de barras / SKU<input data-campo="skuNuevo" type="text" maxlength="30" value="${escapeHTML(l.skuNuevo)}" /></label>
+        <label>Código de barras / SKU<input data-campo="skuNuevo" type="text" maxlength="30" value="${escapeHTML(l.skuNuevo)}" data-escaneo="codigo" placeholder="Escribe o escanea" /></label>
         <label>Precio de venta*<input data-campo="precioNuevo" type="number" step="0.01" min="0" value="${escapeHTML(String(l.precioNuevo))}" /></label>
       </div>` : ''}
     </div>`;
@@ -2852,6 +4092,7 @@
     const cont = document.getElementById('compraLineas');
     if(!cont || !borradorCompra) return;
     cont.innerHTML = borradorCompra.lineas.map(htmlLineaCompra).join('') || '<p style="color:var(--ink-soft); font-size:.88rem;">Agrega los productos que llegaron con esta factura.</p>';
+    activarBuscadores(cont);
     actualizarTotalCompra();
   }
   function actualizarTotalCompra(){
@@ -2873,7 +4114,8 @@
   function abrirNuevaCompra(base){
     borradorCompra = Object.assign({ numero:'', proveedor:'', rfc:'', fecha: todayStr(), uuid:'', lineas:[], desdeXml:false }, base || {});
     if(!borradorCompra.lineas.length) borradorCompra.lineas.push(lineaCompraVacia());
-    openModal(borradorCompra.desdeXml ? 'Revisa la factura (leída del XML)' : 'Nueva factura de compra', `
+    const corrigiendo = !!borradorCompra.editandoId;
+    openModal(corrigiendo ? 'Corregir factura ' + escapeHTML(borradorCompra.numero) : (borradorCompra.desdeXml ? 'Revisa la factura (leída del XML)' : 'Nueva factura de compra'), `
       <form id="compraForm" onsubmit="return false;">
         <div class="compra-cabecera">
           <label>Factura*<input data-cab="numero" type="text" maxlength="40" value="${escapeHTML(borradorCompra.numero)}" /></label>
@@ -2885,8 +4127,19 @@
         <div id="compraLineas" style="margin-top:12px;"></div>
         <button type="button" class="btn-secondary btn-sm" data-action="compra-agregar-linea">+ Agregar producto</button>
         <p id="compraTotal" style="margin-top:12px; font-weight:700;"></p>
+        ${corrigiendo ? `
+        <p style="font-size:.8rem; color:var(--ink-soft); margin:10px 0 4px;">Al guardar, el inventario se ajusta con la diferencia: se resta lo que estaba capturado de más y se suma lo que faltaba. El gasto en Finanzas se corrige con los nuevos costos.</p>
+        <div class="compra-cabecera" style="margin-top:6px;">
+          <label>¿Qué estás corrigiendo?*<input name="motivoEdicion" type="text" maxlength="120" placeholder="Ej. Cantidad mal capturada" /></label>
+          <label>PIN de administrador*<input name="pin" type="password" inputmode="numeric" autocomplete="off" /></label>
+        </div>
+        <div id="editarNegativosWrap" style="display:none;"></div>
+        <p id="editarCompraError" class="error-text" style="display:none; margin-top:6px;"></p>` : ''}
       </form>
-    `, `
+    `, corrigiendo ? `
+      <button type="button" class="btn-ghost" data-action="close-modal">Cancelar</button>
+      <button type="button" class="btn-primary" data-action="compra-editar-guardar">Guardar cambios</button>
+    ` : `
       <button type="button" class="btn-ghost" data-action="close-modal">Cancelar</button>
       <button type="button" class="btn-primary" data-action="compra-guardar">Guardar factura</button>
     `);
@@ -2907,17 +4160,24 @@
     form.addEventListener('change', alEditar);
     pintarLineasCompra();
   }
-  function guardarCompra(){
+  async function guardarCompra(){
     if(bloqueadoPorSuspension()) return;
     const b = borradorCompra;
-    if(!b) return;
+    if(!b || guardandoCompra) return;
+    if(multiActivo() && cloudEnabled && navigator.onLine && !sinExtrasMulti){
+      // Varias máquinas: antes de revisar si la factura ya existe, se traen las que registraron las demás
+      guardandoCompra = true;
+      try{ await traerComprasMulti(); }catch(e){ /* sin conexión: se revisa con lo que hay */ }
+      finally{ guardandoCompra = false; }
+      if(borradorCompra !== b) return;
+    }
     const numero = (b.numero||'').trim();
     const proveedor = (b.proveedor||'').trim();
     const uuid = (b.uuid||'').trim();
     if(!numero){ showToast('Escribe el número de factura.', 'warn'); return; }
     if(!/^\d{4}-\d{2}-\d{2}$/.test(b.fecha||'')){ showToast('Escribe la fecha de la factura.', 'warn'); return; }
     if(!b.lineas.length){ showToast('Agrega al menos un producto.', 'warn'); return; }
-    const existentes = state.compras || [];
+    const existentes = (state.compras || []).filter(f=> !f.anulada);          // una factura anulada no cuenta como repetida
     if(uuid && existentes.some(f=> f.uuid && f.uuid.toLowerCase() === uuid.toLowerCase())){ showToast('Esa factura ya está registrada (mismo folio fiscal).', 'warn'); return; }
     if(existentes.some(f=> f.numero.toLowerCase() === numero.toLowerCase() && (f.proveedor||'').toLowerCase() === proveedor.toLowerCase())){
       showToast('Ya hay una factura con ese número y ese proveedor.', 'warn'); return;
@@ -2939,18 +4199,10 @@
     }
     const items = [];
     lineas.forEach(({l, cant, factor, costo})=>{
-      const piezas = r3(cant * factor);
-      const costoPieza = Math.round(costo / factor * 10000) / 10000;
-      let p;
-      if(l.productId === '__nuevo__'){
-        p = addProduct({ name:l.nombreNuevo, category:(l.categoriaNuevo || 'General'), sku:(l.skuNuevo || ''), price:Number(l.precioNuevo), cost:costoPieza, stock:piezas, minStock:5 });
-      }else{
-        p = state.products.find(x=> x.id === l.productId);
-        receiveStock(l.productId, piezas, costoPieza);
-      }
-      if(!p) return;
-      items.push({ productId:p.id, nombre:p.name, sku:p.sku || '', cantidad:piezas, costoUnit:costoPieza, importe:r2(cant * costo), descripcion:l.descripcion || '' });
-      if(b.desdeXml && l.noId){ state.relacionesXml[(b.rfc||'') + '|' + l.noId] = { productId:p.id, factor }; }
+      const item = aplicarLineaCompra(l, cant, factor, costo);
+      if(!item) return;
+      items.push(item);
+      if(b.desdeXml && l.noId){ state.relacionesXml[(b.rfc||'') + '|' + l.noId] = { productId:item.productId, factor }; }
     });
     const registro = { id: uid('cf_'), numero, proveedor, fecha:b.fecha, uuid, total: r2(items.reduce((s,it)=> s + it.importe, 0)), items, creadaISO: new Date().toISOString() };
     state.compras.unshift(compraCompacta(registro));
@@ -2971,8 +4223,7 @@
       const { data } = await traerTodo(()=> supabaseClient.from('compras_factura').select('*')
         .eq('negocio_id', state.negocioId).order('created_at', {ascending:false}).order('id', {ascending:true}));
       if(data && data.length){
-        state.compras = data.map(f=> compraCompacta({ id:f.id, numero:f.numero, proveedor:f.proveedor||'', fecha:f.fecha, uuid:f.uuid_fiscal||'',
-          total:Number(f.total)||0, items:f.items||[], creadaISO:f.created_at }));
+        state.compras = data.map(compraDesdeFila);
         recortarComprasLocales();
         saveState();
         renderCompras();
@@ -3002,8 +4253,13 @@
       { para:'todos', modulo:'gastos', titulo:'Gastos de caja',
         detalle:'Registra el dinero que sale de la caja chica. Se descuenta del efectivo esperado del corte.',
         pasos:['Abre la pestaña Caja con un turno abierto.','Toca "Registrar gasto" y escribe el concepto y el monto.','Pon tu código de cajero. El corte ya lo descuenta.'] },
+      { para:'admin', modulo:'compras', titulo:'Anular y corregir facturas de compra',
+        detalle:'Si una factura se capturó mal, ya puedes corregirla o anularla (con tu PIN). El inventario y el gasto en Finanzas se ajustan solos, y la factura anulada queda marcada, sin borrarse.',
+        pasos:['En Compras, toca "Ver" en la factura.','Toca "Corregir" para cambiar cantidades, costos o productos, o "Anular" si no debió registrarse.','Escribe el motivo y tu PIN de administrador.','Una factura anulada queda en la lista marcada como "Anulada" y puedes volver a registrarla bien.'] },
+      { para:'todos', modulo:'precios', titulo:'Precios editables al vender',
+        detalle:'Puedes cambiar el precio de cualquier producto al venderlo (por ejemplo, para amigos). Escribe el nuevo precio en el renglón de la venta, en las negritas de la derecha. Queda registrado.' },
       { para:'admin', modulo:'servicios', titulo:'Servicios con materiales y mano de obra',
-        detalle:'Vende servicios; los materiales se descuentan del inventario y la mano de obra cuenta como costo.',
+        detalle:'Vende servicios; los materiales se descuentan del inventario y la mano de obra cuenta como costo. Cada servicio tiene su botón Vender, y al venderlo puedes cambiar el precio y la mano de obra (queda registrado).',
         pasos:['Entra a Administración con tu PIN y abre la pestaña Servicios.','Toca "Nuevo servicio": nombre, precio al cliente y mano de obra.','Agrega los materiales con su cantidad (se aceptan decimales, como 3.5 litros).','El servicio aparece en Vender como cualquier producto.'] }
     ]},
     { version:'2026.10.06', items:[
@@ -3209,7 +4465,7 @@
       <form id="addProductForm" class="form-grid">
         <label>Nombre*<input required name="name" type="text" maxlength="60" /></label>
         <label>Categoría<input name="category" type="text" maxlength="30" placeholder="General" list="categoryDatalistAdd" /></label>
-        <label>SKU / código<input name="sku" type="text" maxlength="30" /></label>
+        <label>SKU / código<input name="sku" type="text" maxlength="30" data-escaneo="codigo" placeholder="Escribe o escanea el código" /></label>
         <label id="addPrecioLabel"><span id="addPrecioTxt">Precio de venta*</span><input required name="price" type="number" min="0" step="0.01" placeholder="0.00" /></label>
         <label id="addCostoLabel">Costo por unidad<input name="cost" type="number" min="0" step="0.01" placeholder="0.00" /></label>
         ${modoAdmin ? (
@@ -3223,7 +4479,7 @@
           <label>Precio de venta del paquete*<input name="pkPrecio" type="number" min="0" step="0.01" placeholder="0.00" /></label>
           <label>Costo de cada paquete (opcional)<input name="pkCosto" type="number" min="0" step="0.01" placeholder="0.00" /></label>
           <label>Cuántos paquetes llegaron ahora (opcional)<input name="pkLlegaron" type="number" min="0" step="1" placeholder="0" /></label>
-          <label>Código de barras del paquete (opcional)<input name="pkSku" type="text" maxlength="30" /></label>
+          <label>Código de barras del paquete (opcional)<input name="pkSku" type="text" maxlength="30" data-escaneo="codigo" placeholder="Escribe o escanea el código" /></label>
           <p id="addPrecioNota" style="font-size:.8rem; color:var(--ink-soft);"></p>
         </div>
         <div id="addStockFields" class="form-grid">
@@ -3392,10 +4648,10 @@
   function openReceiveStockModal(){
     const recibibles = state.products.filter(p=> !p.ilimitado);
     if(recibibles.length===0){ showToast('Primero agrega un producto al inventario.', 'warn'); return; }
-    const options = recibibles.map(p=>`<option value="${p.id}">${escapeHTML(p.name)} (existencia actual: ${formatCantidad(p.stock)})</option>`).join('');
+    const options = recibibles.map(p=>`<option value="${p.id}" data-sku="${escapeHTML(codigosDeProducto(p))}">${escapeHTML(p.name)} (existencia actual: ${formatCantidad(p.stock)})</option>`).join('');
     openModal('Recibir mercancía', `
       <form id="receiveStockForm" class="form-grid">
-        <label>Producto*<select required name="productId" id="receiveProductSelect">${options}</select></label>
+        <label>Producto*<select required name="productId" id="receiveProductSelect" data-buscable data-siguiente="qty">${options}</select></label>
         <label id="receiveModoWrap" style="display:none;">Recibir en
           <select name="modo" id="receiveModoSelect">
             <option value="piezas">Piezas</option>
@@ -3419,6 +4675,7 @@
     `);
     const formRec = document.getElementById('receiveStockForm');
     const selProd = document.getElementById('receiveProductSelect');
+    activarBuscadores(document.getElementById('modalRoot'));
     const selModo = document.getElementById('receiveModoSelect');
     const selPaq = document.getElementById('receivePaqueteSelect');
     const llenarPaquetesRecepcion = ()=>{
@@ -3485,7 +4742,7 @@
       <form id="editProductForm" class="form-grid">
         <label>Nombre*<input required name="name" type="text" maxlength="60" value="${escapeHTML(p.name)}" /></label>
         <label>Categoría<input name="category" type="text" maxlength="30" value="${escapeHTML(p.category)}" list="categoryDatalistEdit" /></label>
-        <label>SKU / código<input name="sku" type="text" maxlength="30" value="${escapeHTML(p.sku||'')}" /></label>
+        <label>SKU / código<input name="sku" type="text" maxlength="30" value="${escapeHTML(p.sku||'')}" data-escaneo="codigo" data-excluir="${escapeHTML(p.id)}" placeholder="Escribe o escanea el código" /></label>
         <label>Precio de venta*<input required name="price" type="number" min="0" step="0.01" value="${((p.paquetes||[]).some(x=> Number(x.piezas)>=2 && Number(p.price)>=Number(x.precio) && Number(x.precio)>0)) ? 0 : p.price}" /></label>
         ${(p.porMonto || (p.paquetes||[]).length) ? `<p style="font-size:.8rem; color:var(--ink-soft); margin-top:-6px;">Es el precio de UNA pieza. Déjalo en 0 para que se calcule solo a partir del paquete.</p>` : ''}
         <label>Costo por unidad<input name="cost" type="number" min="0" step="0.01" value="${p.cost||0}" /></label>
@@ -3703,6 +4960,7 @@
       const itemsSummary = s.items.map(i=>`${i.qty}× ${escapeHTML(i.name)}`).join(', ');
       const etiquetas = [];
       if(s.cuentaTransferencia) etiquetas.push(`<span class="stock-pill stock-low">🏦 ${escapeHTML(s.cuentaTransferencia)}</span>`);
+      if((s.items||[]).some(i=> i.ajustado)) etiquetas.push('<span class="stock-pill stock-low">Precio ajustado</span>');
       if(s.cancelada) etiquetas.push('<span class="stock-pill stock-out">Cancelada</span>');
       if(s.requiereFactura) etiquetas.push('<span class="stock-pill stock-ok">Facturó</span>');
       return `<tr style="${s.cancelada?'opacity:.55;':''}">
@@ -3752,7 +5010,8 @@
         const timeStr = d.toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'});
         const etiquetas = [];
         if(s.cuentaTransferencia) etiquetas.push(`<span class="stock-pill stock-low">🏦 ${escapeHTML(s.cuentaTransferencia)}</span>`);
-        if(s.cancelada) etiquetas.push('<span class="stock-pill stock-out">Cancelada</span>');
+        if((s.items||[]).some(i=> i.ajustado)) etiquetas.push('<span class="stock-pill stock-low">Precio ajustado</span>');
+      if(s.cancelada) etiquetas.push('<span class="stock-pill stock-out">Cancelada</span>');
         if(s.requiereFactura) etiquetas.push('<span class="stock-pill stock-ok">Facturó</span>');
         return `<tr style="${s.cancelada?'opacity:.55;':''}">
           <td>${dateStr}</td><td>${timeStr}</td><td class="mono">${s.folio}${etiquetas.length?'<br>'+etiquetas.join(' '):''}</td><td>${methodDisplay(s)}</td>
@@ -3947,6 +5206,12 @@
       if(error || !data || !data.length) return;
       for(const fila of data){
         const codigo = (fila.codigo_barra||'').trim();
+        const destino = campoEscaneoDestino();
+        if(destino){                                              // hay un campo de código en pantalla: el código va ahí
+          aplicarEscaneoACampo(destino, codigo);
+          await supabaseClient.from('escaneos_pendientes').update({ procesado:true }).eq('id', fila.id);
+          continue;
+        }
         const v = buscarVendiblePorSku(codigo);
         if(v && disponiblesDeVendible(v)>0){
           addToCart(v.id);
@@ -4402,10 +5667,10 @@
   function openPromoModal(){
     const conPrecio = state.products.filter(p=> Number(p.price)>0);
     if(conPrecio.length===0){ showToast('Primero agrega un producto con precio por pieza.', 'warn'); return; }
-    const options = conPrecio.map(p=>`<option value="${p.id}">${escapeHTML(p.name)} (${formatMoney(p.price)})</option>`).join('');
+    const options = conPrecio.map(p=>`<option value="${p.id}" data-sku="${escapeHTML(codigosDeProducto(p))}">${escapeHTML(p.name)} (${formatMoney(p.price)})</option>`).join('');
     openModal('Agregar promoción', `
       <form id="promoForm" class="form-grid">
-        <label>Producto*<select required name="productId">${options}</select></label>
+        <label>Producto*<select required name="productId" data-buscable>${options}</select></label>
         <label>Llevando (piezas)*<input required name="qty" type="number" min="2" step="1" placeholder="2" /></label>
         <label>Precio por ese paquete de piezas*<input required name="precio" type="number" min="0" step="0.01" placeholder="0.00" /></label>
         <label>Vigente hasta (opcional)<input name="hasta" type="date" /></label>
@@ -4464,14 +5729,14 @@
     const pk = (editando && baseEd) ? (baseEd.paquetes||[]).find(x=>x.id===paqueteId) : null;
     if(editando && !pk) return;
     if(!editando && state.products.length===0){ showToast('Primero agrega un producto al inventario.', 'warn'); return; }
-    const options = state.products.map(p=>`<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('');
+    const options = state.products.map(p=>`<option value="${p.id}" data-sku="${escapeHTML(codigosDeProducto(p))}">${escapeHTML(p.name)}</option>`).join('');
     openModal(editando ? 'Editar paquete' : 'Agregar paquete', `
       <form id="paqueteForm" class="form-grid">
-        <label>Producto base*<select required name="productId" ${editando?'disabled':''}>${options}</select></label>
+        <label>Producto base*<select required name="productId" data-buscable ${editando?'disabled':''}>${options}</select></label>
         <label>Nombre del paquete*<input required name="nombre" type="text" maxlength="60" placeholder="Ej. Casillero de 30" value="${pk?escapeHTML(pk.nombre):''}" /></label>
         <label>Piezas que descuenta del producto base*<input required name="piezas" type="number" min="1" step="1" placeholder="30" value="${pk?pk.piezas:''}" /></label>
         <label>Precio de venta del paquete*<input required name="precio" type="number" min="0" step="0.01" placeholder="0.00" value="${pk?pk.precio:''}" /></label>
-        <label>SKU / código de barras (opcional)<input name="sku" type="text" maxlength="30" value="${pk?escapeHTML(pk.sku||''):''}" /></label>
+        <label>SKU / código de barras (opcional)<input name="sku" type="text" maxlength="30" value="${pk?escapeHTML(pk.sku||''):''}" data-escaneo="codigo" data-excluir="${editando ? escapeHTML(productId) : ''}" placeholder="Escribe o escanea el código" /></label>
         <p style="font-size:.8rem; color:var(--ink-soft);">Ejemplos: "Casillero de 30" → 30 piezas a $95 · "$10 de huevo" → 3 piezas a $10. Si manejas casilleros de otro tamaño, da de alta un paquete por cada tamaño.</p>
       </form>
     `, `
@@ -5162,6 +6427,10 @@
       case 'compras-nueva': abrirNuevaCompra(); break;
       case 'compras-xml': { const inp = document.getElementById('comprasXmlInput'); if(inp){ inp.value = ''; inp.click(); } break; }
       case 'compras-ver': abrirDetalleCompra(id); break;
+      case 'compras-anular': abrirAnularCompra(id); break;
+      case 'compras-editar': abrirEditarCompra(id); break;
+      case 'compra-anular-confirmar': confirmarAnularCompra(); break;
+      case 'compra-editar-guardar': guardarEdicionCompra(); break;
       case 'compras-ver-todo': comprasVerTodo = true; renderCompras(); break;
       case 'compras-ver-menos': comprasVerTodo = false; renderCompras(); break;
       case 'compra-agregar-linea': agregarLineaCompra(); break;
@@ -5169,6 +6438,11 @@
       case 'compra-guardar': guardarCompra(); break;
       case 'servicio-nuevo': abrirServicioModal(); break;
       case 'servicio-ver': abrirDetalleServicio(id); break;
+      case 'pv-confirmar': confirmarPrecioVariable(id); break;
+      case 'servicio-vender': abrirVentaRapidaServicio(id); break;
+      case 'vr-metodo': elegirMetodoVentaRapida(btn.dataset.m); break;
+      case 'vr-cobrar': cobrarVentaRapida(); break;
+      case 'vr-carrito': ventaRapidaAlCarrito(); break;
       case 'servicio-editar': abrirServicioModal(id); break;
       case 'servicio-eliminar': pedirEliminarServicio(id); break;
       case 'servicio-eliminar-ok': eliminarServicio(id); break;
@@ -5270,7 +6544,24 @@
     if(e.key === 'Enter'){
       const n = scanBuffer.length;
       const promedio = n>1 ? (scanLastTime - scanFirstTime)/(n-1) : Infinity;
-      if(promedio <= SCAN_MAX_AVG_MS) procesarPosibleEscaneoUSB(scanBuffer);
+      if(promedio <= SCAN_MAX_AVG_MS){
+        const codigoEscaneado = scanBuffer.trim();
+        const destino = codigoEscaneado.length >= 4 ? campoEscaneoDestino() : null;
+        if(destino){
+          // Hay un campo de código en pantalla: el código se escribe ahí (no se manda a la venta) y el Enter de la
+          // pistola NO guarda el formulario.
+          e.preventDefault();
+          const activo = document.activeElement;
+          if(activo && activo !== destino && (activo.tagName === 'INPUT' || activo.tagName === 'TEXTAREA') && typeof activo.value === 'string'){
+            // la pistola tecleó el código en otro campo: se le quita
+            activo.value = activo.value.endsWith(codigoEscaneado) ? activo.value.slice(0, -codigoEscaneado.length) : activo.value;
+            activo.dispatchEvent(new Event('input', {bubbles:true}));
+          }
+          aplicarEscaneoACampo(destino, codigoEscaneado);
+        }else{
+          procesarPosibleEscaneoUSB(scanBuffer);
+        }
+      }
       scanBuffer = '';
       return;
     }
@@ -5358,6 +6649,7 @@
       if(state.turnoActual) iniciarPollEscaneos();
     }
     iniciarModulos();
+    arrancarMaquinas();
     reconciliarTurno();
     if(!window.__reconciliarTurnoTimer){
       window.__reconciliarTurnoTimer = setInterval(reconciliarTurno, 5*60*1000);
