@@ -716,7 +716,8 @@
       const defs = [
         ['servicios', 'Servicios', 'Servicios con materiales y mano de obra (taller mecánico y similares). Los materiales se descuentan del inventario al vender el servicio.'],
         ['gastos', 'Gastos de caja', 'Registrar salidas de dinero de la caja chica. Se descuentan del efectivo esperado del corte.'],
-        ['compras', 'Compras por factura', 'Registrar la mercancía por factura (con carga de XML) y buscarla después por factura (farmacias y similares).']
+        ['compras', 'Compras por factura', 'Registrar la mercancía por factura (con carga de XML) y buscarla después por factura (farmacias y similares).'],
+        ['precios', 'Precios editables al vender', 'Permite cambiar el precio de CUALQUIER producto al venderlo (por ejemplo, para dar un precio especial a amigos). El cambio queda registrado y se resume en el Reporte. Los servicios ya permiten cambiar el precio sin este módulo.']
       ];
       el.innerHTML = `
         <div class="detail-section">
@@ -1177,6 +1178,11 @@
     // Lista "para contar físicamente": solo mercancía física (un servicio ilimitado no se puede contar)
     const inventarioFilas = fisicos.map(p=>`<tr><td>${escapeHTML(p.name)}</td><td class="num">${formatMoney(p.cost||0)}</td><td class="num">${p.stock}</td><td class="num">${formatMoney((p.cost||0)*p.stock)}</td></tr>`).join('');
     const facturasPendientes = ventasList.filter(v=> v.requiere_factura);
+    const ajustesServicio = (()=>{
+      let n = 0, dif = 0;
+      ventasList.forEach(v=> (v.items||[]).forEach(it=>{ if(it.ajustado){ n++; dif += (Number(it.price) - Number(it.precioLista != null ? it.precioLista : it.price)) * Number(it.qty||1); } }));
+      return { n, dif };
+    })();
     const facturasFilas = facturasPendientes.map(v=>{
       const df = v.datos_fiscales || {};
       return `<tr>
@@ -1194,6 +1200,7 @@
         <div class="report-card"><span class="summary-label">Ganancia bruta</span><div class="v">${formatMoney(ganancia)}</div></div>
         <div class="report-card"><span class="summary-label">Invertido en mercancía</span><div class="v">${formatMoney(inversion)}</div></div>
         <div class="report-card"><span class="summary-label">Costo de lo vendido</span><div class="v">${formatMoney(costoVendido)}</div></div>
+          ${ajustesServicio.n ? `<div class="report-card"><span class="summary-label">Precios ajustados al vender (${ajustesServicio.n})</span><div class="v" style="color:${ajustesServicio.dif < 0 ? 'var(--red)' : 'inherit'};">${ajustesServicio.dif >= 0 ? '+' : '−'}${formatMoney(Math.abs(ajustesServicio.dif))}</div><span style="font-size:.74rem; color:var(--ink-soft);">frente al precio de lista</span></div>` : ''}
         <div class="report-card"><span class="summary-label">Valor del inventario actual</span><div class="v">${formatMoney(valorInventario)}</div></div>
       </div>
       <h4 style="margin-top:16px; font-family:'Space Grotesk',sans-serif; font-size:.9rem;">Inventario teórico actual (para contar físicamente)</h4>
