@@ -966,7 +966,7 @@
                   <td>${t.fecha_cierre ? new Date(t.fecha_cierre).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'}) : '—'}</td>
                   <td>${escapeHTML(t.cajero_apertura||'—')}</td>
                   <td>${escapeHTML(t.cajero_cierre||'—')}</td>
-                  <td class="num" style="color:${color}; font-weight:600;">${escapeHTML(etiqueta)}</td>
+                  <td class="num" style="color:${color}; font-weight:600;">${escapeHTML(etiqueta)}${t.corregido ? ' <span class="status-pill status-prueba">Corregido</span>' : ''}</td>
                   <td><button type="button" class="btn-secondary btn-sm" data-ver-corte="${t.id}">Ver detalle</button></td>
                 </tr>`;
               }).join('') : '<tr><td colspan="5"><div class="empty-state">Sin cortes en este rango.</div></td></tr>'}</tbody>
@@ -995,6 +995,16 @@
                 ${fila('Transferencia', t.transferencia_esperado, t.transferencia_contado)}
                 ${fila('Terminal bancaria', t.terminal_esperado, t.terminal_contado)}
               </div>
+              ${(Array.isArray(t.correcciones) && t.correcciones.length) ? `
+              <div class="detail-section">
+                <h4>Corregido ${t.correcciones.length} ${t.correcciones.length===1 ? 'vez' : 'veces'}</h4>
+                <p style="font-size:.8rem; color:var(--ink-soft); margin:0 0 8px;">Lo que el cajero contó al cerrar: efectivo ${formatMoney((t.correcciones[0].antes||{}).efectivo)} · transferencia ${formatMoney((t.correcciones[0].antes||{}).transferencia)} · terminal ${formatMoney((t.correcciones[0].antes||{}).terminal)} (diferencia ${formatMoney((t.correcciones[0].antes||{}).diferencia)}).</p>
+                ${t.correcciones.map(c=>`<div style="margin-bottom:8px; padding:8px 10px; border:1px solid var(--line); border-radius:var(--radius-md); font-size:.84rem;">
+                  ${c.en ? new Date(c.en).toLocaleString('es-MX',{dateStyle:'medium',timeStyle:'short'}) : ''} · ${escapeHTML(c.por||'')}<br>
+                  Motivo: ${escapeHTML(c.motivo||'—')}<br>
+                  Efectivo ${formatMoney((c.antes||{}).efectivo)} → ${formatMoney((c.despues||{}).efectivo)} · Transferencia ${formatMoney((c.antes||{}).transferencia)} → ${formatMoney((c.despues||{}).transferencia)} · Terminal ${formatMoney((c.antes||{}).terminal)} → ${formatMoney((c.despues||{}).terminal)}<br>
+                  Diferencia ${formatMoney((c.antes||{}).diferencia)} → ${formatMoney((c.despues||{}).diferencia)}</div>`).join('')}
+              </div>` : ''}
             `);
           });
         });
